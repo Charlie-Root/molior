@@ -1,0 +1,26 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build the Docker Build image
+      run: docker build -t docker-bullseye-build -f Dockerfile.build .
+    - name: Create the Debian Packages
+      run: mkdir docker/bin && ./build -i docker-bullseye-build -o docker/bin/ ./ 
+    - name: Build the Docker images
+      run: cd docker && docker-compose up -d

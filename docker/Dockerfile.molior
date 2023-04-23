@@ -8,6 +8,21 @@ RUN wget http://molior.info/archive-keyring.asc -q -O- | apt-key add -
 
 COPY apt.sources /etc/apt/sources.list.d/molior.list
 
+COPY bin/*.deb /tmp
+RUN apt-get update && apt-get install -y python3-all postgresql postgresql-contrib
+
+RUN dpkg -i /tmp/molior-client-http_1.4.1_all.deb || true
+RUN apt-get -f -y install && dpkg -i /tmp/molior-client-http_1.4.1_all.deb 
+
+RUN dpkg -i /tmp/molior-os-config_1.4.1_all.deb || true
+RUN apt-get -f -y install && dpkg -i /tmp/molior-os-config_1.4.1_all.deb
+
+RUN dpkg -i /tmp/molior-node-amd64_1.4.1_all.deb || true
+RUN apt-get -f -y install && dpkg -i /tmp/molior-node-amd64_1.4.1_all.deb
+
+RUN dpkg -i /tmp/molior-server_1.4.1_all.deb || true
+RUN apt-get -f -y install && dpkg -i /tmp/molior-server_1.4.1_all.deb
+
 RUN apt-get update \
     && apt-get install -y molior-server molior-web \
     && rm -rf /var/lib/apt/lists/*

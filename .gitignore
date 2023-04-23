@@ -43,3 +43,7 @@ doc/validation/report.pdf
 **_minted-input
 *_minted-report
 test2pdf-*
+
+# output
+output
+docker/bin

@@ -22,5 +22,5 @@ jobs:
       run: docker build -t docker-bullseye-build -f Dockerfile.build .
     - name: Create the Debian Packages
       run: mkdir docker/bin && ./build -i docker-bullseye-build -o docker/bin/ ./ 
-    - name: Build the Docker images
+    - name: Build and run the Docker images
       run: cd docker && docker-compose up -d

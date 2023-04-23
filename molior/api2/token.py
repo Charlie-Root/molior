@@ -22,7 +22,7 @@ async def get_tokens(request):
         query = query.outerjoin(Authtoken_Project)
         query = query.filter(or_(Authtoken_Project.project_id != exclude_project_id, Authtoken_Project.project_id.is_(None)))
     if description:
-        query = query.filter(Authtoken.description.ilike("%{}%".format(description)))
+        query = query.filter(Authtoken.description.ilike(f"%{description}%"))
     query = paginate(request, query)
     tokens = query.all()
     data = {

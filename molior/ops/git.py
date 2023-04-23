@@ -57,7 +57,7 @@ async def GitClone(build_id, repo_id, session):
 
         await build.logtitle("Clone Respository")
         logger.info("cloning repository '%s' into '%s'", repo.url, str(repo.src_path))
-        await build.log("I: cloning repository '{}'\n".format(repo.url))
+        await build.log(f"I: cloning repository '{repo.url}'\n")
 
         if not repo.path.exists():
             repo.path.mkdir()
@@ -66,8 +66,11 @@ async def GitClone(build_id, repo_id, session):
             logger.info("clone task: removing git repo %s", str(repo.src_path))
             shutil.rmtree(str(repo.src_path))
 
-        if not await run_git("git clone --config http.sslVerify=false {} {}".format(repo.url, str(repo.src_path)),
-                             str(repo.path), build):
+        if not await run_git(
+            f"git clone --config http.sslVerify=false {repo.url} {str(repo.src_path)}",
+            str(repo.path),
+            build,
+        ):
             logger.error("error running git clone")
             repo.set_error()
             await build.set_failed()
@@ -184,7 +187,12 @@ async def GitCheckout(repo_path, git_ref, build_id):
             return False
         if not await run_git("git fetch --tags --prune --prune-tags --force", repo_path, build, write_output_log=False):
             return False
-        if not await run_git("git checkout --force {}".format(git_ref), repo_path, build, write_output_log=False):
+        if not await run_git(
+            f"git checkout --force {git_ref}",
+            repo_path,
+            build,
+            write_output_log=False,
+        ):
             return False
 
         git_commands = ["git submodule sync --recursive",
@@ -192,7 +200,7 @@ async def GitCheckout(repo_path, git_ref, build_id):
                         "git clean -dffx",
                         "git lfs pull"]
         if not await run_git_cmds(git_commands, repo_path, build):
-            logger.error("Error checking out git ref '%s'" % git_ref)
+            logger.error(f"Error checking out git ref '{git_ref}'")
             return False
 
     return True
@@ -297,8 +305,10 @@ async def GetBuildInfo(repo_path, git_ref):
 
 
 async def GitChangeUrl(old_repo_path, name, url):
-    process = Launchy("git remote set-url origin {}".format(url), None, None, cwd=str(old_repo_path))
+    process = Launchy(
+        f"git remote set-url origin {url}", None, None, cwd=str(old_repo_path)
+    )
     await process.launch()
     await process.wait()
     if os.path.exists(old_repo_path):
-        os.rename(old_repo_path, os.path.dirname(old_repo_path) + "/" + name)
+        os.rename(old_repo_path, f"{os.path.dirname(old_repo_path)}/{name}")

@@ -27,7 +27,7 @@ class BuildLogger:
         """
         Stops the livelogging
         """
-        logger.debug("build-{}: stopping buildlogger".format(self.build_id))
+        logger.debug(f"build-{self.build_id}: stopping buildlogger")
         self.__up = False
 
     def check_abort(self):
@@ -36,12 +36,14 @@ class BuildLogger:
             if not build:
                 logger.error("build: build %d not found", self.build_id)
                 return True
-            if build.buildstate == "build_failed" or \
-               build.buildstate == "publish_failed" or \
-               build.buildstate == "successful" or \
-               build.buildstate == "already_exists" or \
-               build.buildstate == "already_failed" or \
-               build.buildstate == "nothing_done":
+            if build.buildstate in [
+                "build_failed",
+                "publish_failed",
+                "successful",
+                "already_exists",
+                "already_failed",
+                "nothing_done",
+            ]:
                 return True
         return False
 
@@ -49,7 +51,7 @@ class BuildLogger:
         """
         Starts the livelogging
         """
-        logger.debug("build-{}: starting buildlogger".format(self.build_id))
+        logger.debug(f"build-{self.build_id}: starting buildlogger")
         self.__up = True
         while self.__up:
             try:
@@ -134,11 +136,11 @@ async def websocket_message(ws, msg):
         logger.error("cannot parse websocket message from user '%s'", ws.cirrina.web_session.get("username"))
 
     if "subject" not in data or "action" not in data:
-        logger.error("unknown websocket message recieved: {}".format(data))
+        logger.error(f"unknown websocket message recieved: {data}")
         return
 
     if data.get("subject") != Subject.buildlog.value:
-        logger.error("unknown websocket message recieved: {}".format(data))
+        logger.error(f"unknown websocket message recieved: {data}")
         return
 
     if data.get("action") == Action.start.value:
@@ -146,7 +148,7 @@ async def websocket_message(ws, msg):
     elif data.get("action") == Action.stop.value:
         await stop_buildlogger(ws)
     else:
-        logger.error("unknown websocket message recieved: {}".format(data))
+        logger.error(f"unknown websocket message recieved: {data}")
         return
 
 

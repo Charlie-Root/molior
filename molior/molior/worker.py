@@ -65,7 +65,7 @@ def cleanup_repos():
             try:
                 repoinfo = giturlparse.parse(repo.url)
             except giturlparse.parser.ParserError:
-                logger.warning("error parsing git url: {}".format(repo.url))
+                logger.warning(f"error parsing git url: {repo.url}")
                 continue
             repo.name = repoinfo.name
         if repos:
@@ -102,7 +102,7 @@ class Worker:
             logger.error("buildlatest: repo %d not found", repo_id)
             return
 
-        if repo.state != "new" and repo.state != "error":
+        if repo.state not in ["new", "error"]:
             logger.error("Repository with id '%d' not ready for clone, ignoring request", repo_id)
             return
 
@@ -172,7 +172,7 @@ class Worker:
             logger.error("srcbuild: build %d not found", build_id)
             return
 
-        if build.buildstate != "new" and build.buildstate != "build_failed":
+        if build.buildstate not in ["new", "build_failed"]:
             return
 
         asyncio.ensure_future(BuildSourcePackage(build_id))
@@ -253,23 +253,24 @@ class Worker:
             return
 
         ok = False
-        if build.buildtype == "deb":
-            if build.buildstate == "build_failed" or \
-               build.buildstate == "publish_failed":
-                ok = True
-                buildout = "/var/lib/molior/buildout/%d" % build_id
-                if Path(buildout).exists():
-                    logger.info("removing %s", buildout)
-                    try:
-                        rmtree(buildout)
-                    except Exception as exc:
-                        logger.exception(exc)
+        if build.buildtype == "deb" and build.buildstate in [
+            "build_failed",
+            "publish_failed",
+        ]:
+            ok = True
+            buildout = "/var/lib/molior/buildout/%d" % build_id
+            if Path(buildout).exists():
+                logger.info("removing %s", buildout)
+                try:
+                    rmtree(buildout)
+                except Exception as exc:
+                    logger.exception(exc)
 
-                await build.set_needs_build()
-                session.commit()
+            await build.set_needs_build()
+            session.commit()
 
-                args = {"schedule": []}
-                await enqueue_task(args)
+            args = {"schedule": []}
+            await enqueue_task(args)
 
         if build.buildtype == "source":
             if build.buildstate == "publish_failed":
@@ -293,27 +294,31 @@ class Worker:
                 await enqueue_task({"src_build": [build.id]})
                 ok = True
 
-        if build.buildtype == "chroot":
-            if build.buildstate == "build_failed":
+        if build.buildtype == "chroot" and build.buildstate == "build_failed":
+            ok = True
+            if (
+                chroot := session.query(Chroot)
+                .filter(Chroot.build_id == build_id)
+                .first()
+            ):
+                args = {"buildenv": [
+                        chroot.id,
+                        build_id,
+                        chroot.basemirror.mirror_distribution,
+                        chroot.basemirror.project.name,
+                        chroot.basemirror.name,
+                        chroot.architecture,
+                        chroot.basemirror.mirror_components,
+                        chroot.get_mirror_url(),
+                        chroot.get_mirror_keys(),
+                        ]}
+                await enqueue_task(args)
                 ok = True
-                chroot = session.query(Chroot).filter(Chroot.build_id == build_id).first()
-                if chroot:
-                    args = {"buildenv": [
-                            chroot.id,
-                            build_id,
-                            chroot.basemirror.mirror_distribution,
-                            chroot.basemirror.project.name,
-                            chroot.basemirror.name,
-                            chroot.architecture,
-                            chroot.basemirror.mirror_components,
-                            chroot.get_mirror_url(),
-                            chroot.get_mirror_keys(),
-                            ]}
-                    await enqueue_task(args)
-                    ok = True
 
         if not ok:
-            logger.error("rebuilding {} build in state {} not supported".format(build.buildtype, build.buildstate))
+            logger.error(
+                f"rebuilding {build.buildtype} build in state {build.buildstate} not supported"
+            )
 
     async def _schedule(self, _):
         asyncio.ensure_future(ScheduleBuilds())
@@ -321,12 +326,16 @@ class Worker:
     async def _buildenv(self, args):
         cfg = Configuration()
         max_parallel_chroots = cfg.max_parallel_chroots
-        if max_parallel_chroots and type(max_parallel_chroots) is int and max_parallel_chroots > 0:
-            if self.chroot_build_count >= max_parallel_chroots:
-                await enqueue_task({"buildenv": args})
-                logger.info("worker: building %d chroots already, requeueing...", self.chroot_build_count)
-                await asyncio.sleep(2)
-                return
+        if (
+            max_parallel_chroots
+            and type(max_parallel_chroots) is int
+            and max_parallel_chroots > 0
+            and self.chroot_build_count >= max_parallel_chroots
+        ):
+            await enqueue_task({"buildenv": args})
+            logger.info("worker: building %d chroots already, requeueing...", self.chroot_build_count)
+            await asyncio.sleep(2)
+            return
 
         self.chroot_build_count += 1
 
@@ -371,7 +380,7 @@ class Worker:
             await asyncio.sleep(2)
             return
 
-        if duplicate.state != "ready" and duplicate.state != "error":  # merge duplicates in error state
+        if duplicate.state not in ["ready", "error"]:  # merge duplicates in error state
             logger.info("worker: repo %d not ready, requeueing", duplicate_id)
             await enqueue_task({"merge_duplicate_repo": args})
             await asyncio.sleep(2)
@@ -389,12 +398,15 @@ class Worker:
         sourepprovers = session.query(SouRepProVer).filter(
                 SouRepProVer.sourcerepository_id == duplicate.id).all()
         for sourepprover in sourepprovers:
-            # we check if original is in the projectversion already
-
-            t = session.query(SouRepProVer).filter(
-                SouRepProVer.sourcerepository_id == original.id,
-                SouRepProVer.projectversion_id == sourepprover.projectversion_id).first()
-            if t:
+            if (
+                t := session.query(SouRepProVer)
+                .filter(
+                    SouRepProVer.sourcerepository_id == original.id,
+                    SouRepProVer.projectversion_id
+                    == sourepprover.projectversion_id,
+                )
+                .first()
+            ):
                 phs = session.query(PostBuildHook).filter(
                       PostBuildHook.sourcerepositoryprojectversion_id == sourepprover.id).all()
                 for p in phs:
@@ -423,7 +435,7 @@ class Worker:
             logger.error("merge: repo %d not found", repository_id)
             return
 
-        if repo.state != "ready" and repo.state != "error":
+        if repo.state not in ["ready", "error"]:
             logger.info("worker: repo %d not ready, requeueing", repository_id)
             await enqueue_task({"delete_repo": args})
             await asyncio.sleep(2)
@@ -447,7 +459,7 @@ class Worker:
             logger.error("repo_change_url: repo %d not found", repository_id)
             return
 
-        if repo.state != "ready" and repo.state != "error":
+        if repo.state not in ["ready", "error"]:
             logger.info("worker: repo %d not ready, requeueing", repository_id)
             await enqueue_task({"repo_change_url": args})
             await asyncio.sleep(2)
@@ -492,32 +504,27 @@ class Worker:
                 with Session() as session:
 
                     handled = False
-                    args = task.get("clone")
-                    if args:
+                    if args := task.get("clone"):
                         handled = True
                         await self._clone(args, session)
 
                     if not handled:
-                        args = task.get("build")
-                        if args:
+                        if args := task.get("build"):
                             handled = True
                             await self._build(args, session)
 
                     if not handled:
-                        args = task.get("buildlatest")
-                        if args:
+                        if args := task.get("buildlatest"):
                             handled = True
                             await self._buildlatest(args, session)
 
                     if not handled:
-                        args = task.get("src_build")
-                        if args:
+                        if args := task.get("src_build"):
                             handled = True
                             await self._srcbuild(args, session)
 
                     if not handled:
-                        args = task.get("rebuild")
-                        if args:
+                        if args := task.get("rebuild"):
                             handled = True
                             await self._rebuild(args, session)
 
@@ -528,26 +535,22 @@ class Worker:
                             await self._schedule(session)
 
                     if not handled:
-                        args = task.get("buildenv")
-                        if args:
+                        if args := task.get("buildenv"):
                             handled = True
                             await self._buildenv(args)
 
                     if not handled:
-                        args = task.get("merge_duplicate_repo")
-                        if args:
+                        if args := task.get("merge_duplicate_repo"):
                             handled = True
                             await self._merge_duplicate_repo(args, session)
 
                     if not handled:
-                        args = task.get("delete_repo")
-                        if args:
+                        if args := task.get("delete_repo"):
                             handled = True
                             await self._delete_repo(args, session)
 
                     if not handled:
-                        args = task.get("repo_change_url")
-                        if args:
+                        if args := task.get("repo_change_url"):
                             handled = True
                             await self._repo_change_url(args, session)
 

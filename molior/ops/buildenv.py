@@ -45,7 +45,7 @@ async def CreateBuildEnv(chroot_id, build_id, dist,
         await process.launch()
         ret = await process.wait()
 
-        if not ret == 0:
+        if ret != 0:
             logger.error("error creating build env")
             await build.log("Error creating build environment\n")
             await build.log("\n")
@@ -66,7 +66,7 @@ async def CreateBuildEnv(chroot_id, build_id, dist,
         await process.launch()
         ret = await process.wait()
 
-        if not ret == 0:
+        if ret != 0:
             logger.error("error publishing build env")
             await build.log("Error publishing build environment\n")
             await build.logtitle("Done", no_footer_newline=True)
@@ -115,7 +115,7 @@ async def DeleteBuildEnv(dist, name, version, arch):
     await process.launch()
     ret = await process.wait()
 
-    if not ret == 0:
+    if ret != 0:
         logger.error("error deleting build env")
         return False
 

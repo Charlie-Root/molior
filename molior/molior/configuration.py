@@ -29,10 +29,9 @@ class Configuration(object):  # pylint: disable=too-few-public-methods
             self._config = {}
             return
 
-        config_file = open(file_path, "r")
-        config = yaml.safe_load(config_file)
-        self._config = config if config else {}
-        config_file.close()
+        with open(file_path, "r") as config_file:
+            config = yaml.safe_load(config_file)
+            self._config = config or {}
 
     def config(self):
         """

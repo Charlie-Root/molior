@@ -32,13 +32,12 @@ def paginate(request, query):
 
     if not page_size:
         page_size = request.GET.getone("per_page", None)
-        if not page_size:
-            return query
+    if not page_size:
+        return query
 
     try:
         page = int(page)
-        if page < 1:
-            page = 1
+        page = max(page, 1)
     except (ValueError, TypeError):
         page = 1
 
@@ -143,8 +142,7 @@ async def get_changelog_attr(name, path):
 
 
 def strip_epoch_version(version):
-    m = re.match(r"(?:\d+:)?(\d.+)", version)
-    if m:
+    if m := re.match(r"(?:\d+:)?(\d.+)", version):
         version = m.groups()[0]
     return version
 
@@ -155,8 +153,7 @@ def get_local_tz():
         return local_tz
 
     timezone = "Europe/Zurich"
-    f = open("/etc/timezone", "r")
-    if f:
+    if f := open("/etc/timezone", "r"):
         timezone = f.read().strip()
         f.close()
     local_tz = pytz.timezone(timezone)
@@ -194,18 +191,9 @@ async def write_log_title(build_id, line, no_footer_newline=False, no_header_new
     now = get_local_tz().localize(datetime.now(), is_dst=None)
     date = datetime.strftime(now, "%a, %d %b %Y %H:%M:%S %z")
 
-    header_newline = "\n"
-    if no_header_newline:
-        header_newline = ""
-
-    footer_newline = "\n"
-    if no_footer_newline:
-        footer_newline = ""
-
-    color = 36
-    if error:
-        color = 31
-
+    header_newline = "" if no_header_newline else "\n"
+    footer_newline = "" if no_footer_newline else "\n"
+    color = 31 if error else 36
     BORDER = 80 * "+"
 
     path = Path(Configuration().working_dir) / "buildout" / str(build_id) / "build.log"
@@ -213,9 +201,9 @@ async def write_log_title(build_id, line, no_footer_newline=False, no_header_new
         path.parent.mkdir()
     async with AIOFile(path, "a+") as afp:
         writer = Writer(afp)
-        await writer("{}\x1b[{}m\x1b[1m{}\x1b[0m\n".format(header_newline, color, BORDER))
+        await writer(f"{header_newline}\x1b[{color}m\x1b[1m{BORDER}\x1b[0m\n")
         await writer("\x1b[{}m\x1b[1m| molior: {:36} {} |\x1b[0m\n".format(color, line, date))
-        await writer("\x1b[{}m\x1b[1m{}\x1b[0m\n{}".format(color, BORDER, footer_newline))
+        await writer(f"\x1b[{color}m\x1b[1m{BORDER}\x1b[0m\n{footer_newline}")
 
 
 def array2db(array):
@@ -223,9 +211,7 @@ def array2db(array):
 
 
 def db2array(val):
-    if not val:
-        return []
-    return val[1:-1].split(",")
+    return val[1:-1].split(",") if val else []
 
 
 def escape_for_like(query: str) -> str:

@@ -14,7 +14,7 @@ class Maintainer(Base):
 
     @hybrid_property
     def fullname(self):
-        return "{} {}".format(self.firstname, self.surname)
+        return f"{self.firstname} {self.surname}"
 
     @fullname.expression
     def fullname(cls):

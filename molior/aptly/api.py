@@ -85,17 +85,13 @@ class AptlyApi:
             name: The aptly repository name
             publish_name: The aptly publish name
         """
-        if is_mirror:
-            tag = "mirrors"
-        else:
-            tag = "repos"
-
+        tag = "mirrors" if is_mirror else "repos"
         if base_mirror:
-            name = "{}-{}-{}-{}".format(base_mirror, base_mirror_version, repo, version)
-            publish_name = "{}_{}_{}_{}_{}".format(base_mirror, base_mirror_version, tag, repo, version)
+            name = f"{base_mirror}-{base_mirror_version}-{repo}-{version}"
+            publish_name = f"{base_mirror}_{base_mirror_version}_{tag}_{repo}_{version}"
         else:
-            name = "{}-{}".format(repo, version)
-            publish_name = "{}_{}".format(repo, version)
+            name = f"{repo}-{version}"
+            publish_name = f"{repo}_{version}"
 
         return name, publish_name
 
@@ -209,11 +205,13 @@ class AptlyApi:
             try:
                 async with aiohttp.ClientSession() as http:
                     async with http.get(key_url) as resp:
-                        if not resp.status == 200:
+                        if resp.status != 200:
                             raise AptlyError("ConnectionError", "Could not download key")
                         data["GpgKeyArmor"] = await resp.text()
-            except Exception:
-                raise AptlyError("ConnectionError", "Could not download key: {}".format(key_url))
+            except Exception as e:
+                raise AptlyError(
+                    "ConnectionError", f"Could not download key: {key_url}"
+                ) from e
         else:
             data["Keyserver"] = key_server
             data["GpgKeyID"] = " ".join(keys)
@@ -237,7 +235,7 @@ class AptlyApi:
 
         for component in components:
             data = {
-                "Name": "{}-{}".format(name, component),
+                "Name": f"{name}-{component}",
                 "ArchiveURL": url,
                 "Distribution": mirror_distribution,
                 "Components": [component],
@@ -301,13 +299,17 @@ class AptlyApi:
             task = await self.DELETE(f"/publish/{publish_name}/{mirror_distribution}")
             await self.wait_task(task["ID"])
         except Exception:
-            logger.warning("Error deleting mirror publish  {}/{}".format(publish_name, mirror_distribution))
+            logger.warning(
+                f"Error deleting mirror publish  {publish_name}/{mirror_distribution}"
+            )
 
         # remove snapshots (may fail)
         try:
             await self.mirror_snapshot_delete(base_mirror, base_mirror_version, mirror, version, components)
         except Exception:
-            logger.warning("Error deleting mirror snapshot {}/{}".format(publish_name, mirror_distribution))
+            logger.warning(
+                f"Error deleting mirror snapshot {publish_name}/{mirror_distribution}"
+            )
 
         # remove mirrors
         for component in components:
@@ -315,7 +317,7 @@ class AptlyApi:
                 task = await self.DELETE(f"/mirrors/{name}-{component}")
                 await self.wait_task(task["ID"])
             except Exception:
-                logger.warning("Error deleting mirror {}/{}".format(publish_name, mirror_distribution))
+                logger.warning(f"Error deleting mirror {publish_name}/{mirror_distribution}")
 
         return True
 
@@ -350,7 +352,7 @@ class AptlyApi:
         name, _ = self.get_aptly_names(base_mirror, base_mirror_version, mirror, version, is_mirror=True)
         tasks = []
         for component in components:
-            data = {"Name": "{}-{}".format(name, component)}
+            data = {"Name": f"{name}-{component}"}
             task = await self.POST(f"/mirrors/{name}-{component}/snapshots", data=data)
             tasks.append(task["ID"])
         return tasks
@@ -367,7 +369,7 @@ class AptlyApi:
                 communicating with the aptly api.
         """
         progress = {}
-        for i in range(20):
+        for _ in range(20):
             try:
                 state = await self.GET(f"/tasks/{task_id}")
                 progress = await self.GET(f"/tasks/{task_id}/detail")
@@ -375,8 +377,6 @@ class AptlyApi:
             except Exception:
                 logger.warning("Error fetching mirror progress, retrying in 30s")
                 await asyncio.sleep(30)
-                continue
-
         if not progress:
             progress = {
                 "TotalNumberOfPackages": 0,
@@ -415,7 +415,7 @@ class AptlyApi:
             "AcquireByHash": True,
         }
         for component in components:
-            data["Sources"].append({"Component": component, "Name": "{}-{}".format(name, component)})
+            data["Sources"].append({"Component": component, "Name": f"{name}-{component}"})
 
         task = await self.POST(f"/publish/{publish_name}", data=data)
         return task["ID"]
@@ -537,9 +537,7 @@ class AptlyApi:
         Returns:
             list: List of package refs.
         """
-        params = None
-        if search:
-            params = {"q": search}
+        params = {"q": search} if search else None
         return await self.GET(f"/repos/{repo_name}/packages", params=params)
 
     async def repo_packages_delete(self, repo_name, package_refs):
@@ -641,8 +639,7 @@ class AptlyApi:
                 communicating with the aptly api.
         """
         data = {"Name": new_name}
-        task = await self.PUT(f"/repos/{name}", data=data)
-        return task
+        return await self.PUT(f"/repos/{name}", data=data)
 
     async def delete_directory(self, directory_name):
         """
@@ -689,8 +686,7 @@ class AptlyApi:
         """
         task = await self.POST("/db/cleanup")
 
-        task_id = task.get("ID")
-        if task_id:
+        if task_id := task.get("ID"):
             if not await self.wait_task(task_id):
                 logger.error("aptly: cleanup task failed")
                 return False
@@ -755,10 +751,7 @@ class AptlyApi:
             pass
 
         task_id = await self.snapshot_rename(snapshot_name_tmp, snapshot_name)
-        if not await self.wait_task(task_id):
-            return False
-
-        return True
+        return bool(await self.wait_task(task_id))
 
     async def wait_task(self, task_id):
         """
@@ -771,7 +764,7 @@ class AptlyApi:
             bool: True if task was succesful, otherwise False.
         """
         if type(task_id) is not int:
-            raise Exception("task_id '%s' must be int" % str(task_id))
+            raise Exception(f"task_id '{str(task_id)}' must be int")
 
         while True:
             await asyncio.sleep(2)
@@ -800,7 +793,7 @@ class AptlyApi:
         """
         version = "unknown"
         async with aiohttp.ClientSession() as http:
-            async with http.get(self.url + "/version", auth=self.auth) as resp:
+            async with http.get(f"{self.url}/version", auth=self.auth) as resp:
                 if not self.__check_status_code(resp.status):
                     self.__raise_aptly_error(resp)
                 data = json.loads(await resp.text())
@@ -833,4 +826,4 @@ def get_snapshot_name(publish_name, dist, temporary=False):
             dist (str): The distribution to be used (stable, unstable)
             temporary (bool): use tempporary extension
     """
-    return "{}-{}{}".format(publish_name, dist, "-tmp" if temporary else "")
+    return f'{publish_name}-{dist}{"-tmp" if temporary else ""}'

@@ -37,37 +37,38 @@ async def delete_build(request):
 
     topbuild = None
     builds = []
-    if build.buildtype == "deb":
+    if build.buildtype == "build":
+        topbuild = build
+        builds.append(topbuild)
+        for b in topbuild.children:
+            builds.append(b)
+            builds.extend(iter(b.children))
+    elif build.buildtype == "deb":
         topbuild = build.parent.parent
         builds.extend([build.parent, build.parent.parent])
-        for b in build.parent.children:
-            builds.append(b)
+        builds.extend(iter(build.parent.children))
     elif build.buildtype == "source":
         topbuild = build.parent
         builds.extend([build, build.parent])
-        for b in build.children:
-            builds.append(b)
-    elif build.buildtype == "build":
-        topbuild = build
-        builds.append(build)
-        for b in build.children:
-            builds.append(b)
-            for c in b.children:
-                builds.append(c)
-
+        builds.extend(iter(build.children))
     if not topbuild:
-        return ErrorResponse(400, "Build of type %s cannot be deleted" % build.buildtype)
+        return ErrorResponse(400, f"Build of type {build.buildtype} cannot be deleted")
 
     for srcbuild in topbuild.children:
         for debbuild in srcbuild.children:
             if debbuild.projectversion and debbuild.projectversion.is_locked:
                 return ErrorResponse(400, "Build from locked projectversion cannot be deleted")
 
-            if debbuild.buildstate == "scheduled" or \
-               debbuild.buildstate == "building" or \
-               debbuild.buildstate == "needs_publish" or \
-               debbuild.buildstate == "publishing":
-                return ErrorResponse(400, "Build in state %s cannot be deleted" % debbuild.buildstate)
+            if debbuild.buildstate in [
+                "scheduled",
+                "building",
+                "needs_publish",
+                "publishing",
+            ]:
+                return ErrorResponse(
+                    400,
+                    f"Build in state {debbuild.buildstate} cannot be deleted",
+                )
 
     for b in builds:
         b.is_deleted = True
@@ -79,7 +80,6 @@ async def delete_build(request):
 
 @app.http_post("/api2/build/{build_id}/abort")
 @app.authenticated
-# FIXME: req_role
 async def abort_build(request):
     """
     Abort a running build
@@ -131,12 +131,10 @@ async def abort_build(request):
     if srcbuild.sourcerepository is None:
         return ErrorResponse(404, "External build uploads cannot be aborted")
 
-    found = False
-    for deb in srcbuild.children:
-        if deb.buildstate == "building" or deb.buildstate == "needs_build":
-            found = True
-            break
-
+    found = any(
+        deb.buildstate in ["building", "needs_build"]
+        for deb in srcbuild.children
+    )
     if not found:
         return ErrorResponse(404, "No running deb builds found")
 

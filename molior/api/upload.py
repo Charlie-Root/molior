@@ -14,7 +14,7 @@ from ..molior.queues import buildlog
 
 if not os.environ.get("IS_SPHINX", False):
     config = Configuration()
-    upload_dir = config.working_dir + "/upload/"
+    upload_dir = f"{config.working_dir}/upload/"
     buildout_path = Path(Configuration().working_dir) / "buildout"
 else:
     upload_dir = "/non/existent"
@@ -40,7 +40,7 @@ async def file_upload(request, tempfile, filename, size):
     except Exception as exc:
         logger.exception(exc)
 
-    return web.Response(text="file uploaded: {} ({} bytes)".format(filename, size))
+    return web.Response(text=f"file uploaded: {filename} ({size} bytes)")
 
 
 @app.websocket_connect(group="log")
@@ -56,7 +56,7 @@ async def ws_logs_connected(ws_client):
             return ws_client
         build_id = build.id
 
-    logger.debug("ws: recieving logs for build {}".format(build_id))
+    logger.debug(f"ws: recieving logs for build {build_id}")
     ws_client.cirrina.build_id = build_id
     return ws_client
 
@@ -71,6 +71,6 @@ async def ws_logs(ws_client, msg):
 @app.websocket_disconnect(group="log")
 async def ws_logs_disconnected(ws_client):
     if hasattr(ws_client.cirrina, "build_id"):
-        logger.debug("ws: end of logs for build {}".format(ws_client.cirrina.build_id))
+        logger.debug(f"ws: end of logs for build {ws_client.cirrina.build_id}")
         await buildlog(ws_client.cirrina.build_id, None)  # signal end of logs
     return ws_client

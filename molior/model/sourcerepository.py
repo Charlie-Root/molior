@@ -32,7 +32,7 @@ class SourceRepository(Base):
             Path: The sourcerepo's top level path.
         """
         cfg = Configuration()
-        cwd = cfg.working_dir if cfg.working_dir else DEFAULT_CWD
+        cwd = cfg.working_dir or DEFAULT_CWD
         return Path(cwd, "repositories", str(self.id))
 
     @property

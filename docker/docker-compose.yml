@@ -2,7 +2,8 @@ version: '3'
 services:
   molior:
     container_name: molior
-    image: neolynx/molior
+    build:
+      dockerfile: Dockerfile.molior
     volumes:
       - molior_data:/var/lib/molior:rw
       - postgres_data:/var/lib/postgresql:rw
@@ -20,7 +21,8 @@ services:
       - "8000:80"
   aptly:
     container_name: aptly
-    image: neolynx/molior-aptly
+    build:
+      dockerfile: Dockerfile.aptly
     volumes:
       - aptly_data:/var/lib/aptly:rw
     environment:

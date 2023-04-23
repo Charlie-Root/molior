@@ -53,18 +53,19 @@ async def get_projects(request):
     query = db.query(Project).filter(Project.is_mirror.is_(False)).order_by(Project.name)
 
     if filter_name:
-        query = query.filter(Project.name.ilike("%{}%".format(escape_for_like(filter_name))))
+        query = query.filter(Project.name.ilike(f"%{escape_for_like(filter_name)}%"))
 
     nb_results = query.count()
     query = paginate(request, query)
     results = query.all()
 
-    data = {"total_result_count": nb_results}
-    data["results"] = [
-        {"id": item.id, "name": item.name, "description": item.description}
-        for item in results
-    ]
-
+    data = {
+        "total_result_count": nb_results,
+        "results": [
+            {"id": item.id, "name": item.name, "description": item.description}
+            for item in results
+        ],
+    }
     return web.json_response(data)
 
 
@@ -107,7 +108,7 @@ async def get_project(request):
 
     project = db.query(Project).filter_by(id=project_id).first()
     if not project:
-        return ErrorResponse(404, "Project with id {} could not be found!".format(project_id))
+        return ErrorResponse(404, f"Project with id {project_id} could not be found!")
 
     versions = db.query(ProjectVersion).filter_by(project_id=project.id,
                                                   is_deleted=show_deleted).order_by(func.lower(ProjectVersion.name).desc()).all()
@@ -126,7 +127,6 @@ async def get_project(request):
 
 @app.http_post("/api/projects")
 @req_admin
-# FIXME: req_role
 async def create_project(request):
     """
     Creates a new project.
@@ -170,14 +170,16 @@ async def create_project(request):
     username = request.cirrina.web_session.get('username')
     auth_token = request.cirrina.web_session.get("auth_token", None)
     if username:
-        user = db.query(User).filter(User.username == username).first()
-        if user:
+        if user := db.query(User).filter(User.username == username).first():
             userrole = UserRole(user_id=user.id, project_id=project.id, role="owner")
             db.add(userrole)
             db.commit()
     elif auth_token:
-        token = db.query(Authtoken).filter(Authtoken.token == auth_token).first()
-        if token:
+        if (
+            token := db.query(Authtoken)
+            .filter(Authtoken.token == auth_token)
+            .first()
+        ):
             # FIXME: check already added
             mapping = Authtoken_Project(project_id=project.id, authtoken_id=token.id, roles=array2db(['owner']))
             db.add(mapping)
@@ -230,7 +232,7 @@ async def update_project(request):
 
     project = db.query(Project).filter_by(id=project_id).first()
     if not project:
-        return ErrorResponse(404, "project {} not found".format(project_id))
+        return ErrorResponse(404, f"project {project_id} not found")
     project.description = description
     db.commit()
     return OKResponse("project updated")
@@ -238,7 +240,6 @@ async def update_project(request):
 
 @app.http_delete("/api/projects/{project_id}")
 @app.authenticated
-# FIXME: req_role
 async def delete_project(request):
     """
     Removes a project from the database.
@@ -269,11 +270,10 @@ async def delete_project(request):
     except (ValueError, TypeError):
         return ErrorResponse(400, "Incorrect value for project_id")
 
-    project = db.query(Project).filter_by(id=project_id).first()
-    if project:
+    if project := db.query(Project).filter_by(id=project_id).first():
         project.delete()
 
-    return OKResponse("project {} deleted".format(project_id))
+    return OKResponse(f"project {project_id} deleted")
 
 
 @app.http_get("/api/projectsources/{project_name}/{project_version}")
@@ -321,18 +321,19 @@ async def get_apt_sources(request):
         apt_url = cfg.aptly.get("apt_url")
     keyfile = cfg.aptly.get("key")
 
-    sources_list = "# APT Sources for project {0} {1}\n".format(projectversion.project.name, projectversion.name)
-    sources_list += "# GPG-Key: {0}/{1}\n".format(apt_url, keyfile)
+    sources_list = "# APT Sources for project {0} {1}\n".format(
+        projectversion.project.name, projectversion.name
+    ) + "# GPG-Key: {0}/{1}\n".format(apt_url, keyfile)
     if not projectversion.project.is_basemirror and projectversion.basemirror:
         sources_list += "# Base Mirror\n"
-        sources_list += "{}\n".format(projectversion.basemirror.get_apt_repo())
+        sources_list += f"{projectversion.basemirror.get_apt_repo()}\n"
 
     sources_list += "# Project Sources\n"
     for d in deps:
         dep = db.query(ProjectVersion).filter(ProjectVersion.id == d[0]).first()
         if not dep:
             logger.error("projectsources: projecversion %d not found", d[0])
-        sources_list += "{}\n".format(dep.get_apt_repo())
+        sources_list += f"{dep.get_apt_repo()}\n"
         # ci builds requested & use ci builds from this dep & dep has ci builds
         if unstable == "true" and d[1] and dep.ci_builds_enabled:
             sources_list += "{}\n".format(dep.get_apt_repo(dist="unstable"))

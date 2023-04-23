@@ -27,7 +27,7 @@ class DebianRepository:
         self.aptly = get_aptly_connection()
         ci_cfg = Configuration().ci_builds
         ci_ttl = ci_cfg.get("packages_ttl") if ci_cfg else None
-        self.__ci_packages_ttl = ci_ttl if ci_ttl else self.CI_PACKAGES_TTL
+        self.__ci_packages_ttl = ci_ttl or self.CI_PACKAGES_TTL
 
     @property
     def publish_name(self):
@@ -40,7 +40,7 @@ class DebianRepository:
             stretch_9.2_repos_test_2
         """
 
-        return "{}_{}_repos_{}_{}".format(self.basemirror_name, self.basemirror_version, self.project_name, self.project_version)
+        return f"{self.basemirror_name}_{self.basemirror_version}_repos_{self.project_name}_{self.project_version}"
 
     @property
     def name(self):
@@ -51,7 +51,7 @@ class DebianRepository:
             jessie-8.8-test-1
             stretch-9.2-test-2
         """
-        return "{}-{}-{}-{}".format(self.basemirror_name, self.basemirror_version, self.project_name, self.project_version)
+        return f"{self.basemirror_name}-{self.basemirror_version}-{self.project_name}-{self.project_version}"
 
     async def init(self):
         """
@@ -63,7 +63,7 @@ class DebianRepository:
         repos = await self.aptly.repo_get()
 
         for dist in self.DISTS:
-            repo_name = self.name + "-%s" % dist
+            repo_name = f"{self.name}-{dist}"
             for repo in repos:
                 if repo.get("Name") == repo_name:
                     logger.error("aptly repo '%s' already exists", repo_name)
@@ -75,7 +75,7 @@ class DebianRepository:
                     return False
 
         for dist in self.DISTS:
-            repo_name = self.name + "-%s" % dist
+            repo_name = f"{self.name}-{dist}"
             logger.info("creating repository '%s'", repo_name)
             await self.aptly.repo_create(repo_name)  # not a background task
 
@@ -100,10 +100,9 @@ class DebianRepository:
         Create a snapshot of a reporitory with latest builds.
         """
         dist = "stable"
-        repo_name = self.name + "-%s" % dist
-        publish_name = "{}_{}_repos_{}_{}".format(self.basemirror_name, self.basemirror_version,
-                                                  self.project_name, snapshot_version)
-        snapshot_name = "{}-{}".format(publish_name, dist)
+        repo_name = f"{self.name}-{dist}"
+        publish_name = f"{self.basemirror_name}_{self.basemirror_version}_repos_{self.project_name}_{snapshot_version}"
+        snapshot_name = f"{publish_name}-{dist}"
 
         logger.info("creating release snapshot: '%s'", snapshot_name)
 
@@ -127,7 +126,7 @@ class DebianRepository:
         Delete a repository including publish point amd snapshots
         """
         for dist in self.DISTS:
-            repo_name = self.name + "-%s" % dist
+            repo_name = f"{self.name}-{dist}"
             try:
                 # FIXME: should this aptly task run in background?
                 await self.aptly.publish_drop(self.basemirror_name,
@@ -135,7 +134,7 @@ class DebianRepository:
                                               self.project_name,
                                               self.project_version, dist)
             except Exception:
-                logger.warning("Error deleting publish point of repo '%s'" % repo_name)
+                logger.warning(f"Error deleting publish point of repo '{repo_name}'")
             await asyncio.sleep(2)
 
             # FIXME: delete also old timestamped snapshots
@@ -144,7 +143,7 @@ class DebianRepository:
                 task_id = await self.aptly.snapshot_delete(snapshot_name)
                 await self.aptly.wait_task(task_id)
             except Exception:
-                logger.warning("Error deleting snapshot '%s'" % snapshot_name)
+                logger.warning(f"Error deleting snapshot '{snapshot_name}'")
 
             # delete leftover tmp snapshot
             snapshot_name = get_snapshot_name(self.publish_name, dist, temporary=True)
@@ -158,7 +157,7 @@ class DebianRepository:
                 # FIXME: should this aptly task run in background?
                 await self.aptly.repo_delete(repo_name)
             except Exception:
-                logger.warning("Error deleting repo '%s'" % repo_name)
+                logger.warning(f"Error deleting repo '{repo_name}'")
 
     async def __remove_old_packages(self, packages):
         """
@@ -180,10 +179,7 @@ class DebianRepository:
             if "+git" not in pkg:
                 continue
             gitpart = pkg.split("+git")[1]
-            if "-" in gitpart:
-                dt_str = gitpart.split("-")[0]
-            else:
-                dt_str = gitpart.split(".")[0]
+            dt_str = gitpart.split("-")[0] if "-" in gitpart else gitpart.split(".")[0]
             timestamp = datetime.strptime(dt_str, self.DATETIME_FORMAT)
             if timestamp < delete_date:
                 old_packages.append(pkg)
@@ -191,7 +187,7 @@ class DebianRepository:
         if not old_packages:
             return packages
 
-        repo_name = self.name + "-unstable"
+        repo_name = f"{self.name}-unstable"
         try:
             for old_package in old_packages[:1]:
                 logger.info("removing old package from aptly: '%s'", old_package)
@@ -220,7 +216,7 @@ class DebianRepository:
             return False
 
         dist = "unstable" if ci_build else "stable"
-        repo_name = self.name + "-%s" % dist
+        repo_name = f"{self.name}-{dist}"
         task_id, upload_dir = await self.aptly.repo_add(repo_name, files)
 
         logger.debug("repo add returned aptly task id '%s' and upload dir '%s'", task_id, upload_dir)
@@ -232,6 +228,4 @@ class DebianRepository:
         logger.debug("deleting temporary upload dir: '%s'", upload_dir)
 
         await self.aptly.delete_directory(upload_dir)
-        if not await self.aptly.republish(dist, repo_name, self.publish_name):
-            return False
-        return True
+        return bool(await self.aptly.republish(dist, repo_name, self.publish_name))

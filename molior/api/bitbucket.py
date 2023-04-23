@@ -97,10 +97,13 @@ async def bitbucket_trigger(request):
         logger.exception(exc)
         return web.Response(status=404, text="Error parsing trigger data")
 
-    repo = request.cirrina.db_session.query(SourceRepository).filter(
-                                  SourceRepository.url.like("%/{}/{}.git".format(project, repo))).first()
+    repo = (
+        request.cirrina.db_session.query(SourceRepository)
+        .filter(SourceRepository.url.like(f"%/{project}/{repo}.git"))
+        .first()
+    )
     if not repo:
-        logger.warning("bitbucket trigger: reposiroty not found: {}".format(url))
+        logger.warning(f"bitbucket trigger: reposiroty not found: {url}")
         return web.Response(status=404, text="Repository not found")
 
     build = Build(

@@ -41,11 +41,11 @@ async def get_repository(request):
     try:
         repository_id = int(repository_id)
     except Exception:
-        return ErrorResponse(404, "Repository with id {} not found".format(repository_id))
+        return ErrorResponse(404, f"Repository with id {repository_id} not found")
 
     repo = request.cirrina.db_session.query(SourceRepository).filter_by(id=repository_id).first()
     if not repo:
-        return ErrorResponse(404, "Repository with id {} not found".format(repository_id))
+        return ErrorResponse(404, f"Repository with id {repository_id} not found")
 
     data = {
         "id": repo.id,
@@ -105,20 +105,20 @@ async def get_sourcerepository_dependents(request):
     db = request.cirrina.db_session
     repo = db.query(SourceRepository).filter_by(id=repository_id).first()
     if not repo:
-        return ErrorResponse(404, "Repository with id {} could not be found!".format(repository_id))
+        return ErrorResponse(
+            404, f"Repository with id {repository_id} could not be found!"
+        )
     query = db.query(ProjectVersion).filter(SouRepProVer.projectversion_id == ProjectVersion.id,
                                             SouRepProVer.sourcerepository_id == repo.id)
     if filter_name:
-        query = query.filter(ProjectVersion.fullname.ilike("%{}%".format(filter_name)))
+        query = query.filter(ProjectVersion.fullname.ilike(f"%{filter_name}%"))
     if unlocked:
         query = query.filter(ProjectVersion.is_locked.is_(False))
     query = query.order_by(ProjectVersion.fullname)
     nb_results = query.count()
     query = paginate(request, query)
     dependents = query.all()
-    results = []
-    for dependent in dependents:
-        results.append(dependent.data())
+    results = [dependent.data() for dependent in dependents]
     data = {"total_result_count": nb_results, "results": results}
     return OKResponse(data)
 
@@ -165,10 +165,10 @@ async def get_repositories2(request):
         for term in terms:
             if not term:
                 continue
-            query = query.filter(SourceRepository.url.ilike("%{}%".format(term)))
+            query = query.filter(SourceRepository.url.ilike(f"%{term}%"))
 
     if filter_name:
-        query = query.filter(SourceRepository.name.ilike("%{}%".format(filter_name)))
+        query = query.filter(SourceRepository.name.ilike(f"%{filter_name}%"))
 
     if exclude_projectversion_id != -1:
         query = query.filter(~SourceRepository.projectversions.any(ProjectVersion.id == exclude_projectversion_id))
@@ -191,7 +191,6 @@ async def get_repositories2(request):
 
 
 @app.http_get("/api2/project/{project_id}/{projectversion_id}/repositories")
-# @app.authenticated
 async def get_projectversion_repositories(request):
     """
     Returns source repositories for given project version with the given filters applied.
@@ -269,25 +268,21 @@ async def get_projectversion_repositories(request):
         }
         build = get_last_build(request.cirrina.db_session, projectversion, repo)
         if build:
-            result.update({
-                "last_build": {
-                    "id": build.id,
-                    "version": build.version,
-                    "buildstate": build.buildstate,
-                    "sourcename": build.sourcename,
-                }
-                })
+            result["last_build"] = {
+                "id": build.id,
+                "version": build.version,
+                "buildstate": build.buildstate,
+                "sourcename": build.sourcename,
+            }
             if build.buildstate != "successful":
                 build = get_last_successful_build(request.cirrina.db_session, projectversion, repo)
                 if build:
-                    result.update({
-                        "last_successful_build": {
-                            "id": build.id,
-                            "version": build.version,
-                            "buildstate": build.buildstate,
-                            "sourcename": build.sourcename,
-                        }
-                    })
+                    result["last_successful_build"] = {
+                        "id": build.id,
+                        "version": build.version,
+                        "buildstate": build.buildstate,
+                        "sourcename": build.sourcename,
+                    }
         data["results"].append(result)
 
     return OKResponse(data)
@@ -366,21 +361,31 @@ async def add_repository(request):
 
     for arch in architectures:
         if arch not in db2array(projectversion.mirror_architectures):
-            return ErrorResponse(400, "Invalid architecture: " + arch)
+            return ErrorResponse(400, f"Invalid architecture: {arch}")
 
     db = request.cirrina.db_session
     repo = db.query(SourceRepository).filter(SourceRepository.url == url).first()
     if not repo:
-        query = db.query(SourceRepository).filter(or_(
-                    SourceRepository.url.ilike("%{}%{}%/{}".format(repoinfo.resource, repoinfo.owner, repoinfo.name)),
-                    SourceRepository.url.ilike("%{}%{}%/{}.git".format(repoinfo.resource, repoinfo.owner, repoinfo.name))))
+        query = db.query(SourceRepository).filter(
+            or_(
+                SourceRepository.url.ilike(
+                    f"%{repoinfo.resource}%{repoinfo.owner}%/{repoinfo.name}"
+                ),
+                SourceRepository.url.ilike(
+                    f"%{repoinfo.resource}%{repoinfo.owner}%/{repoinfo.name}.git"
+                ),
+            )
+        )
         if query.count() > 1:
             repo = query.first()
-            logger.info("found {} similar repos {} for {} {} {} - using first".format(query.count(), repo.url, repoinfo.resource,
-                                                                                      repoinfo.owner, repoinfo.name))
+            logger.info(
+                f"found {query.count()} similar repos {repo.url} for {repoinfo.resource} {repoinfo.owner} {repoinfo.name} - using first"
+            )
         elif query.count() == 1:
             repo = query.first()
-            logger.info("found similar repo {} for {} {} {}".format(repo.url, repoinfo.resource, repoinfo.owner, repoinfo.name))
+            logger.info(
+                f"found similar repo {repo.url} for {repoinfo.resource} {repoinfo.owner} {repoinfo.name}"
+            )
         else:
             repo = SourceRepository(url=url, name=repoinfo.name.lower(), state="new")
             db.add(repo)
@@ -416,26 +421,25 @@ async def add_repository(request):
         args = {"clone": [build.id, repo.id]}
         await enqueue_task(args)
 
-    else:  # existing repo
-        if startbuild:
-            build = Build(
-                version=None,
-                git_ref=None,
-                ci_branch=None,
-                is_ci=None,
-                sourcename=repo.name,
-                buildstate="new",
-                buildtype="build",
-                sourcerepository=repo,
-                maintainer=None,
-            )
+    elif startbuild:
+        build = Build(
+            version=None,
+            git_ref=None,
+            ci_branch=None,
+            is_ci=None,
+            sourcename=repo.name,
+            buildstate="new",
+            buildtype="build",
+            sourcerepository=repo,
+            maintainer=None,
+        )
 
-            request.cirrina.db_session.add(build)
-            request.cirrina.db_session.commit()
-            await build.build_added()
+        request.cirrina.db_session.add(build)
+        request.cirrina.db_session.commit()
+        await build.build_added()
 
-            args = {"buildlatest": [repo.id, build.id]}
-            await enqueue_task(args)
+        args = {"buildlatest": [repo.id, build.id]}
+        await enqueue_task(args)
 
     return OKResponse("SourceRepository added")
 
@@ -543,7 +547,10 @@ async def edit_repository(request):
 
     for arch in architectures:
         if arch not in db2array(projectversion.mirror_architectures):
-            return ErrorResponse(400, "The architecture is not invalid, it is not supported in this projectversion: " + arch)
+            return ErrorResponse(
+                400,
+                f"The architecture is not invalid, it is not supported in this projectversion: {arch}",
+            )
 
     db = request.cirrina.db_session
     buildconfig = db.query(SouRepProVer).filter(SouRepProVer.sourcerepository_id == sourcerepository_id,
@@ -941,7 +948,7 @@ async def delete_repository(request):
 
     if repo.projectversions:
         return ErrorResponse(400, "Repository cannot be deleted because it is used by project(s)")
-    if repo.projectversions or builds:
+    if builds:
         return ErrorResponse(400, "Repository cannot be deleted because there are builds using it")
 
     args = {"delete_repo": [repository_id]}

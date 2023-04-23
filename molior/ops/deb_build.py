@@ -56,7 +56,7 @@ async def BuildDebSrc(repo_id, repo_path, build_id, ci_version, is_ci, author, e
         env = os.environ.copy()
         env["DEBFULLNAME"] = author
         env["DEBEMAIL"] = email
-        dchcmd = "dch -v %s --distribution %s --force-distribution 'CI Build'" % (ci_version, distribution)
+        dchcmd = f"dch -v {ci_version} --distribution {distribution} --force-distribution 'CI Build'"
         version = ci_version
 
         process = Launchy(dchcmd, outh, outh, cwd=str(repo_path), env=env)
@@ -175,7 +175,7 @@ async def DownloadDebSrc(repo_id, sourcedir, sourcename, build_id, version, base
         body = None
         async with aiohttp.ClientSession() as http:
             async with http.get(file_url) as resp:
-                if not resp.status == 200:
+                if resp.status != 200:
                     await buildlog(build_id, "E: Error downloading {}\n".format(file_url))
                     continue
                 body = await resp.read()
@@ -273,15 +273,21 @@ async def PrepareBuilds(session, parent, repo, git_ref, ci_branch, custom_target
         if existing_src_build:
             if existing_src_build.buildstate == "successful":
                 source_exists = True
-            elif existing_src_build.buildstate == "new" or existing_src_build.buildstate == "building" or \
-                    existing_src_build.buildstate == "needs_publish" or existing_src_build.buildstate == "publishing":
+            elif existing_src_build.buildstate in [
+                "new",
+                "building",
+                "needs_publish",
+                "publishing",
+            ]:
                 logger.info(f"retry because of src build ({existing_src_build.id}) in new, building, needs_publish or publishing")
                 return BuildPreparationState.RETRY, info
-            elif existing_src_build.buildstate == "build_failed" or existing_src_build.buildstate == "publish_failed":
+            elif existing_src_build.buildstate in [
+                "build_failed",
+                "publish_failed",
+            ]:
                 logger.info(f"abort because of src build ({existing_src_build.id}) in state build_failed or publish_failed")
                 return BuildPreparationState.ERROR, info
 
-            # create info object
             class BuildInfo:
                 pass
 
@@ -339,7 +345,7 @@ async def PrepareBuilds(session, parent, repo, git_ref, ci_branch, custom_target
         if not source_exists:
             repo.set_ready()
         session.commit()
-        logger.info(f"abort because of no build info found")
+        logger.info("abort because of no build info found")
         return BuildPreparationState.ERROR, info
 
     if force_ci:
@@ -358,7 +364,7 @@ async def PrepareBuilds(session, parent, repo, git_ref, ci_branch, custom_target
             await process.launch()
             ret = await process.wait()
             if ret != 0:
-                logger.error("error running git describe: %s" % gittag.strip())
+                logger.error(f"error running git describe: {gittag.strip()}")
             else:
                 v = strip_epoch_version(info.version)
                 if not re.match("^v?{}$".format(v.replace("~", "-").replace("+", "\\+")), gittag) or "+git" in v:
@@ -395,11 +401,18 @@ async def PrepareBuilds(session, parent, repo, git_ref, ci_branch, custom_target
             session.commit()
             if existing_src_build.buildstate == "successful":
                 source_exists = True
-            elif existing_src_build.buildstate == "new" or existing_src_build.buildstate == "building" or \
-                    existing_src_build.buildstate == "needs_publish" or existing_src_build.buildstate == "publishing":
+            elif existing_src_build.buildstate in [
+                "new",
+                "building",
+                "needs_publish",
+                "publishing",
+            ]:
                 logger.info(f"retry because of src build ({existing_src_build.id}) in new, building, needs_publish or publishing")
                 return BuildPreparationState.RETRY, info
-            elif existing_src_build.buildstate == "build_failed" or existing_src_build.buildstate == "publish_failed":
+            elif existing_src_build.buildstate in [
+                "build_failed",
+                "publish_failed",
+            ]:
                 logger.info(f"abort because of src build ({existing_src_build.id}) in state build_failed or publish_failed")
                 return BuildPreparationState.ERROR, info
 
@@ -480,19 +493,26 @@ async def PrepareBuilds(session, parent, repo, git_ref, ci_branch, custom_target
                     await parent.set_already_exists()
                     session.commit()
                     return BuildPreparationState.ALREADY_DONE, info
-                elif other_build.buildstate == "new" or other_build.buildstate == "building" or \
-                        other_build.buildstate == "needs_publish" or other_build.buildstate == "publishing":
+                elif other_build.buildstate in [
+                    "new",
+                    "building",
+                    "needs_publish",
+                    "publishing",
+                ]:
                     logger.info(f"retry because of src build ({other_build.id}) in new, building, needs_publish or publishing")
                     return BuildPreparationState.RETRY, info
-                elif other_build.buildstate == "build_failed" or other_build.buildstate == "publish_failed":
+                elif other_build.buildstate in [
+                    "build_failed",
+                    "publish_failed",
+                ]:
                     await parent.set_already_failed()
                     session.commit()
                     return BuildPreparationState.ALREADY_DONE, info
 
-            # FIXME: needed ?
-            # args = {"schedule": []}
-            # await enqueue_task(args)
-            # return BuildPreparationState.OK, info
+                    # FIXME: needed ?
+                    # args = {"schedule": []}
+                    # await enqueue_task(args)
+                    # return BuildPreparationState.OK, info
 
     return BuildPreparationState.OK, info
 
@@ -502,12 +522,8 @@ async def CreateBuilds(session, parent, repo, info, git_ref, ci_branch, custom_t
     # Use commiter name as maintainer for CI builds
     if parent.is_ci:
         t = info.author_name.split(" ", 2)
-        if len(t) == 2:
-            firstname = t[0]
-            lastname = t[1]
-        else:
-            firstname = t[0]
-            lastname = ""
+        lastname = t[1] if len(t) == 2 else ""
+        firstname = t[0]
         email = info.author_email
     else:
         firstname = info.firstname
@@ -546,9 +562,7 @@ async def CreateBuilds(session, parent, repo, info, git_ref, ci_branch, custom_t
     await parent.build_changed()
     await build.build_added()
 
-    # add build order dependencies
-    build_after = get_buildorder(repo.src_path)
-    if build_after:
+    if build_after := get_buildorder(repo.src_path):
         await build.parent.log("N: source needs to build after: %s\n" % ", ".join(build_after))
         build.builddeps = "{" + ",".join(build_after) + "}"
         session.commit()
@@ -558,10 +572,9 @@ async def CreateBuilds(session, parent, repo, info, git_ref, ci_branch, custom_t
     for target in info.targets:
         projectversion = session.query(ProjectVersion).filter(ProjectVersion.id == target.projectversion_id).first()
         if projectversion.is_locked:
-            repo.log_state("build to locked projectversion '%s-%s' not permitted" % (
-                    projectversion.project.name,
-                    projectversion.name,
-                ))
+            repo.log_state(
+                f"build to locked projectversion '{projectversion.project.name}-{projectversion.name}' not permitted"
+            )
             await parent.log("W: build to locked projectversion '%s-%s' not permitted\n" % (
                     projectversion.project.name,
                     projectversion.name,
@@ -569,10 +582,9 @@ async def CreateBuilds(session, parent, repo, info, git_ref, ci_branch, custom_t
             continue
 
         if parent.is_ci and not projectversion.ci_builds_enabled:
-            repo.log_state("CI builds not enabled in projectversion '%s-%s'" % (
-                    projectversion.project.name,
-                    projectversion.name,
-                ))
+            repo.log_state(
+                f"CI builds not enabled in projectversion '{projectversion.project.name}-{projectversion.name}'"
+            )
             await parent.log("W: CI builds not enabled in projectversion '%s-%s'\n" % (
                     projectversion.project.name,
                     projectversion.name,
@@ -593,7 +605,9 @@ async def CreateBuilds(session, parent, repo, info, git_ref, ci_branch, custom_t
                     session.commit()
                     found = True  # FIXME: should this be here ?
                     continue
-                await parent.log("W: packages already built for {} {}\n".format(projectversion.fullname, architecture))
+                await parent.log(
+                    f"W: packages already built for {projectversion.fullname} {architecture}\n"
+                )
                 continue
 
             found = True
@@ -718,11 +732,27 @@ async def BuildSourcePackage(build_id):
             await build.logtitle("Source Build")
 
     try:
-        if not source_exists:
-            ret = await BuildDebSrc(repo_id, src_path, build_id, version, is_ci,
-                                    "{} {}".format(firstname, lastname), email)
-        else:
-            ret = await DownloadDebSrc(repo_id, sourcedir, sourcename, build_id, version, basemirror, projectversion)
+        ret = (
+            await DownloadDebSrc(
+                repo_id,
+                sourcedir,
+                sourcename,
+                build_id,
+                version,
+                basemirror,
+                projectversion,
+            )
+            if source_exists
+            else await BuildDebSrc(
+                repo_id,
+                src_path,
+                build_id,
+                version,
+                is_ci,
+                "{} {}".format(firstname, lastname),
+                email,
+            )
+        )
     except Exception as exc:
         logger.exception(exc)
         await fail()
@@ -800,17 +830,14 @@ async def schedule_build(build, session):
     apt_urls = get_apt_repos(project_version, session, is_ci=build.is_ci)
     apt_keys = get_apt_keys(project_version, session)
 
-    arch_any_only = False if arch == get_target_arch(build, session) else True
+    arch_any_only = arch != get_target_arch(build, session)
 
     config = Configuration()
     apt_url = config.aptly.get("apt_url")
 
     token = buildtask.task_id
 
-    run_lintian = True
-    if build.is_ci:
-        run_lintian = False
-
+    run_lintian = not build.is_ci
     await build.set_scheduled()
     session.commit()
 
@@ -876,19 +903,34 @@ async def ScheduleBuilds():
                 for builddep in builddeps:
                     repo_dep = None
                     for buildorder_projectversion in buildorder_projectversions:
-                        repo_dep = session.query(SourceRepository).filter(SourceRepository.projectversions.any(
-                                                 id=buildorder_projectversion)).filter(or_(
-                                                    SourceRepository.url == builddep,
-                                                    SourceRepository.url.like("%/{}".format(builddep)),
-                                                    SourceRepository.url.like("%/{}.git".format(builddep)))).first()
+                        repo_dep = (
+                            session.query(SourceRepository)
+                            .filter(
+                                SourceRepository.projectversions.any(
+                                    id=buildorder_projectversion
+                                )
+                            )
+                            .filter(
+                                or_(
+                                    SourceRepository.url == builddep,
+                                    SourceRepository.url.like(f"%/{builddep}"),
+                                    SourceRepository.url.like(
+                                        f"%/{builddep}.git"
+                                    ),
+                                )
+                            )
+                            .first()
+                        )
                         if repo_dep:
                             break
 
                     if not repo_dep:
-                        logger.error("build-{}: dependency {} not found in projectversion {}".format(build.id,
-                                     builddep, build.projectversion_id))
-                        await build.log("E: dependency {} not found in projectversion {} nor dependencies\n".format(
-                                             builddep, pvname))
+                        logger.error(
+                            f"build-{build.id}: dependency {builddep} not found in projectversion {build.projectversion_id}"
+                        )
+                        await build.log(
+                            f"E: dependency {builddep} not found in projectversion {pvname} nor dependencies\n"
+                        )
                         ready = False
                         break
                     repo_deps.append(repo_dep.id)
@@ -907,29 +949,30 @@ async def ScheduleBuilds():
                     logger.warning("scheduler: repo %d not found", dep_repo_id)
                     continue
 
-                # FIXME: buildconfig arch dependent!
-
-                # find running builds in the same projectversion
-                # FIXME: check also dependencies which are not mirrors
-
-                # check no build order dep is needs_build, building, publishing, ...
-                # FIXME: this needs maybe checking of source packages as well?
-                running_builds = session.query(Build).filter(or_(
+                if (
+                    running_builds := session.query(Build)
+                    .filter(
+                        or_(
                             Build.buildstate == "new",
                             Build.buildstate == "needs_build",
                             Build.buildstate == "scheduled",
                             Build.buildstate == "building",
                             Build.buildstate == "needs_publish",
                             Build.buildstate == "publishing",
-                        ), Build.buildtype == "deb",
+                        ),
+                        Build.buildtype == "deb",
                         Build.sourcerepository_id == dep_repo_id,
-                        Build.projectversion_id.in_(buildorder_projectversions)).all()
-
-                if running_builds:
+                        Build.projectversion_id.in_(
+                            buildorder_projectversions
+                        ),
+                    )
+                    .all()
+                ):
                     ready = False
                     builds = [str(b.id) for b in running_builds]
-                    await build.log("W: waiting for repo {} to finish building ({}) in projectversion {} or dependencies\n".
-                                    format(dep_repo.name, ", ".join(builds), pvname))
+                    await build.log(
+                        f'W: waiting for repo {dep_repo.name} to finish building ({", ".join(builds)}) in projectversion {pvname} or dependencies\n'
+                    )
                     continue
 
                 # find successful builds in the same and dependent projectversions
@@ -947,16 +990,19 @@ async def ScheduleBuilds():
 
                 if not found:
                     ready = False
-                    projectversion = session.query(ProjectVersion).filter(
-                            ProjectVersion.id == build.projectversion_id).first()
-                    if not projectversion:
-                        pvname = "unknown"
-                        logger.warning("scheduler: projectversion %d not found", build.projectversion_id)
-                    else:
+                    if (
+                        projectversion := session.query(ProjectVersion)
+                        .filter(ProjectVersion.id == build.projectversion_id)
+                        .first()
+                    ):
                         pvname = projectversion.fullname
 
-                    await build.log("W: waiting for repo {} to be built in projectversion {} or dependencies\n".format(
-                                         dep_repo.name, pvname))
+                    else:
+                        pvname = "unknown"
+                        logger.warning("scheduler: projectversion %d not found", build.projectversion_id)
+                    await build.log(
+                        f"W: waiting for repo {dep_repo.name} to be built in projectversion {pvname} or dependencies\n"
+                    )
                     continue
 
             if ready:

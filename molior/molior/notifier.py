@@ -57,18 +57,18 @@ async def trigger_hook(method, url, skip_ssl, body=None):
         body (str): The request body, only pass if method is POST
     """
     data = None
-    headers = {"content-type": "application/json"}
     verify = not skip_ssl
 
     try:
         data = json.loads(body)
     except Exception as exc:
-        logger.error("hook: error parsing json body: {}".format(exc))
+        logger.error(f"hook: error parsing json body: {exc}")
         return
 
     connector = aiohttp.TCPConnector(verify_ssl=verify)
 
     if method.lower() == "post":
+        headers = {"content-type": "application/json"}
         async with aiohttp.ClientSession(connector=connector) as http:
             async with http.post(url, headers=headers, data=json.dumps(data)) as resp:
                 if resp.status != 200:
@@ -116,14 +116,14 @@ def send_mail_notification(build):
     arch = build.architecture
     distrelease_version = build.projectversion.basemirror.name
     distrelease = build.projectversion.basemirror.project.name
-    hostname = cfg.hostname if cfg.hostname else socket.getfqdn()
-    link = "http://{}/#!/build/{}".format(hostname, build.id)
+    hostname = cfg.hostname or socket.getfqdn()
+    link = f"http://{hostname}/#!/build/{build.id}"
 
     if build.buildstate == "build_failed":
-        subject = "Build Failed: {} {} ({}-{})".format(pkg_name, version, distrelease, arch)
+        subject = f"Build Failed: {pkg_name} {version} ({distrelease}-{arch})"
         message = "Unfortunately the build failed for:"
     elif build.buildstate == "successful":
-        subject = "Released: {} {} ({}-{})".format(pkg_name, version, distrelease, arch)
+        subject = f"Released: {pkg_name} {version} ({distrelease}-{arch})"
         message = "I've just finished building the debian packages for:"
     else:
         logger.warning("not sending notification: build has state '%s'", str(build.buildstate))

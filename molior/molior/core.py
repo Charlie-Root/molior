@@ -77,8 +77,7 @@ def get_target_config(path):
     try:
         cfg = Configuration(str(config_path))
 
-        target_repo_version = cfg.config().get("target_repo_version")
-        if target_repo_version:
+        if target_repo_version := cfg.config().get("target_repo_version"):
             return [(None, target_repo_version)]
 
         target_config = cfg.config().get("targets")
@@ -96,8 +95,7 @@ def get_target_config(path):
     # in: {"myproject": ["1", "2"]}
     # out: [("myproject", "1"), ("myproject", "2")]
     for project, versions in target_config.items():
-        for version in versions:
-            targets.append((project, str(version)))
+        targets.extend((project, str(version)) for version in versions)
     return list(set(targets))
 
 
@@ -119,8 +117,8 @@ async def get_maintainer(path):
     search = re.search("(.*)<([^>]*)", full)
     if not search:
         return None
-    email = search.group(2)
-    full_name = search.group(1)
+    email = search[2]
+    full_name = search[1]
     firstname = full_name.split(" ")[0]
     surname = " ".join(full_name.split(" ")[1:]).strip()
 
@@ -212,10 +210,9 @@ def get_apt_repos(project_version, session, is_ci=False):
     Returns:
         list: List of apt urls.
     """
-    urls = []
     deps = get_projectversion_deps(project_version.id, session)
 
-    urls.append(project_version.get_apt_repo(internal=True))
+    urls = [project_version.get_apt_repo(internal=True)]
     if is_ci:
         urls.append(project_version.get_apt_repo(dist="unstable", internal=True))
 
@@ -293,7 +290,4 @@ def get_buildorder(path):
         logger.exception(exc)
         return []
 
-    if not build_after:
-        return []
-
-    return build_after
+    return build_after or []

@@ -90,9 +90,7 @@ class ProjectVersion(Base):
             return url if url_only else full
 
         cfg = Configuration()
-        apt_url = None
-        if not internal:
-            apt_url = cfg.aptly.get("apt_url_public")
+        apt_url = None if internal else cfg.aptly.get("apt_url_public")
         if not apt_url:
             apt_url = cfg.aptly.get("apt_url")
 
@@ -109,10 +107,10 @@ class ProjectVersion(Base):
             return url if url_only else full
 
         if not self.basemirror:
-            logger.error("projectversion without basemirror: {}".format(self.id))
+            logger.error(f"projectversion without basemirror: {self.id}")
             return ""
 
-        base_mirror = "{}/{}".format(self.basemirror.project.name, self.basemirror.name)
+        base_mirror = f"{self.basemirror.project.name}/{self.basemirror.name}"
 
         if self.project.is_mirror:
             url = "{0}/{1}/mirrors/{2}/{3}".format(apt_url, base_mirror, self.project.name, self.name)
@@ -153,12 +151,8 @@ class ProjectVersion(Base):
             dict: The dict which can be processed by json_response
 
         """
-        dependency_ids = []
-        for d in self.dependencies:
-            dependency_ids.append(d.id)
-        dependent_ids = []
-        for d in self.dependents:
-            dependent_ids.append(d.id)
+        dependency_ids = [d.id for d in self.dependencies]
+        dependent_ids = [d.id for d in self.dependents]
         data = {
             "id": self.id,
             "name": self.name,
@@ -175,7 +169,7 @@ class ProjectVersion(Base):
             "projectversiontype": self.projectversiontype
         }
         if self.basemirror:
-            data.update({"basemirror": self.basemirror.fullname})
+            data["basemirror"] = self.basemirror.fullname
 
         return data
 
@@ -194,9 +188,12 @@ class ProjectVersion(Base):
         for dependency in self.dependencies:
             if basemirror_id != self.basemirror_id:
                 logger.error("base %d =? %d" % (new_projectversion.basemirror.project_id, self.basemirror.project_id))
-                if new_projectversion.basemirror.project_id != self.basemirror.project_id:
-                    if dependency.dependency_policy != "any":
-                        continue
+                if (
+                    new_projectversion.basemirror.project_id
+                    != self.basemirror.project_id
+                    and dependency.dependency_policy != "any"
+                ):
+                    continue
                 if dependency.dependency_policy not in ["distribution", "any"]:
                     continue
             new_projectversion.dependencies.append(dependency)
@@ -248,10 +245,7 @@ def get_projectversion_deps(projectversion_id, session):
     """
     result = session.execute(query, {"projectversion_id": projectversion_id})
 
-    projectversion_ids = []
-    for row in result:
-        projectversion_ids.append((row[1], row[2]))
-    return projectversion_ids
+    return [(row[1], row[2]) for row in result]
 
 
 def get_projectversion(request, db=None):
@@ -270,7 +264,7 @@ def get_projectversion(request, db=None):
             func.lower(ProjectVersion.name) == version.lower(),
             Project.is_mirror.is_(False)).first()
     if not pv:
-        logger.warning("projectversion not found: %s/%s" % (name, version))
+        logger.warning(f"projectversion not found: {name}/{version}")
     return pv
 
 

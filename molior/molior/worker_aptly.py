@@ -60,26 +60,25 @@ async def startup_mirror():
         for mirror in mirrors:
             base_mirror = ""
             base_mirror_version = ""
-            tasknames = ["Update mirror", "Publish snapshot:"]
-
             m_tasks = None
             build_state = None
             mirror_state = None
             if tasks:
+                tasknames = ["Update mirror", "Publish snapshot:"]
+
                 for i in range(len(tasknames)):
                     taskname = tasknames[i]
                     if not mirror.project.is_basemirror:
                         base_mirror = mirror.basemirror.project.name
                         base_mirror_version = mirror.basemirror.name
-                        task_name = "{} {}-{}-{}-{}-".format(taskname, base_mirror, base_mirror_version,
-                                                             mirror.project.name, mirror.name)
+                        task_name = f"{taskname} {base_mirror}-{base_mirror_version}-{mirror.project.name}-{mirror.name}-"
                     else:
-                        task_name = "{} {}-{}-".format(taskname, mirror.project.name, mirror.name)
-                    # FIXME: search for each component
-                    #  "Publish snapshot: buster-10.4-cmps-main, buster-10.4-cmps-non-free",
-
-                    tmp_tasks = [task for task in tasks if task["Name"].startswith(task_name)]
-                    if tmp_tasks:
+                        task_name = f"{taskname} {mirror.project.name}-{mirror.name}-"
+                    if tmp_tasks := [
+                        task
+                        for task in tasks
+                        if task["Name"].startswith(task_name)
+                    ]:
                         m_tasks = tmp_tasks
                         if i == 0:
                             build_state = "building"
@@ -87,8 +86,6 @@ async def startup_mirror():
                         elif i == 1:
                             build_state = "publishing"
                             mirror_state = "publishing"
-                        # do not break here, use last task in the list
-
             if not m_tasks:
                 # No task on aptly found
                 logger.info("no mirroring tasks found on aptly")
@@ -153,7 +150,7 @@ async def update_mirror(build_id, base_mirror, base_mirror_version, mirror, vers
 async def finalize_mirror(build_id, base_mirror, base_mirror_version,
                           mirror_project, mirror_version, components, architectures, task_ids):
     try:
-        mirrorname = "{}-{}".format(mirror_project, mirror_version)
+        mirrorname = f"{mirror_project}-{mirror_version}"
         logger.debug("finalizing mirror %s tasks %s, build_%d", mirrorname, str(task_ids), build_id)
 
         with Session() as session:
@@ -179,9 +176,7 @@ async def finalize_mirror(build_id, base_mirror, base_mirror_version,
 
             progress = {}
             for task_id in task_ids:
-                progress[task_id] = {}
-                progress[task_id]["State"] = 1  # set running
-
+                progress[task_id] = {"State": 1}
             fields = ["TotalNumberOfPackages", "RemainingNumberOfPackages",
                       "TotalDownloadSize", "RemainingDownloadSize"]
 
@@ -205,57 +200,53 @@ async def finalize_mirror(build_id, base_mirror, base_mirror_version,
                         if progress[task_id]["State"] == 3:
                             failed = True
 
-                    if not running and failed:
-                        logger.error("Error updating mirror %s", mirrorname)
-                        await build.log("E: error updating mirror\n")
-                        mirror.mirror_state = "error"
-                        await build.set_failed()
-                        await build.logdone()
-                        session.commit()
-                        # FIXME: delete all tasks
-                        # await aptly.delete_task(task_id)
-                        return
+                    if not running:
+                        if failed:
+                            logger.error("Error updating mirror %s", mirrorname)
+                            await build.log("E: error updating mirror\n")
+                            mirror.mirror_state = "error"
+                            await build.set_failed()
+                            await build.logdone()
+                            session.commit()
+                            # FIXME: delete all tasks
+                            # await aptly.delete_task(task_id)
+                            return
 
-                    if not running and not failed:
                         break
 
-                    total_progress = {}
-                    for field in fields:
-                        total_progress[field] = 0
+                    total_progress = {field: 0 for field in fields}
+                    for task_id in task_ids:
+                        for field in fields:
+                            if field in progress[task_id]:
+                                total_progress[field] += progress[task_id][field]
 
-                    if running:
-                        for task_id in task_ids:
-                            for field in fields:
-                                if field in progress[task_id]:
-                                    total_progress[field] += progress[task_id][field]
+                    if total_progress["TotalNumberOfPackages"] > 0:
+                        total_progress["PercentPackages"] = (
+                            (total_progress["TotalNumberOfPackages"] - total_progress["RemainingNumberOfPackages"])
+                            / total_progress["TotalNumberOfPackages"] * 100.0)
+                    else:
+                        total_progress["PercentPackages"] = 0.0
 
-                        if total_progress["TotalNumberOfPackages"] > 0:
-                            total_progress["PercentPackages"] = (
-                                (total_progress["TotalNumberOfPackages"] - total_progress["RemainingNumberOfPackages"])
-                                / total_progress["TotalNumberOfPackages"] * 100.0)
-                        else:
-                            total_progress["PercentPackages"] = 0.0
+                    if "TotalDownloadSize" in total_progress and total_progress["TotalDownloadSize"] > 0:
+                        total_progress["PercentSize"] = (
+                            (total_progress["TotalDownloadSize"] - total_progress["RemainingDownloadSize"])
+                            / total_progress["TotalDownloadSize"] * 100.0)
+                    else:
+                        total_progress["PercentSize"] = 0.0
 
-                        if "TotalDownloadSize" in total_progress and total_progress["TotalDownloadSize"] > 0:
-                            total_progress["PercentSize"] = (
+                    logger.info("mirrored %d/%d files (%.02f%%), %.02f/%.02fGB (%.02f%%)",
+                                total_progress["TotalNumberOfPackages"] - total_progress["RemainingNumberOfPackages"],
+                                total_progress["TotalNumberOfPackages"], total_progress["PercentPackages"],
                                 (total_progress["TotalDownloadSize"] - total_progress["RemainingDownloadSize"])
-                                / total_progress["TotalDownloadSize"] * 100.0)
-                        else:
-                            total_progress["PercentSize"] = 0.0
+                                / 1024.0 / 1024.0 / 1024.0,
+                                total_progress["TotalDownloadSize"] / 1024.0 / 1024.0 / 1024.0,
+                                total_progress["PercentSize"],
+                                )
 
-                        logger.info("mirrored %d/%d files (%.02f%%), %.02f/%.02fGB (%.02f%%)",
-                                    total_progress["TotalNumberOfPackages"] - total_progress["RemainingNumberOfPackages"],
-                                    total_progress["TotalNumberOfPackages"], total_progress["PercentPackages"],
-                                    (total_progress["TotalDownloadSize"] - total_progress["RemainingDownloadSize"])
-                                    / 1024.0 / 1024.0 / 1024.0,
-                                    total_progress["TotalDownloadSize"] / 1024.0 / 1024.0 / 1024.0,
-                                    total_progress["PercentSize"],
-                                    )
-
-                        await notify(Subject.build.value, Event.changed.value,
-                                     {"id": build.id, "progress": total_progress["PercentSize"]})
-                        await notify(Subject.mirror.value, Event.changed.value,
-                                     {"id": mirror.id, "progress": total_progress["PercentSize"]})
+                    await notify(Subject.build.value, Event.changed.value,
+                                 {"id": build.id, "progress": total_progress["PercentSize"]})
+                    await notify(Subject.mirror.value, Event.changed.value,
+                                 {"id": mirror.id, "progress": total_progress["PercentSize"]})
                     await asyncio.sleep(5)
 
                 await build.log("I: creating snapshot\n")
@@ -290,13 +281,13 @@ async def finalize_mirror(build_id, base_mirror, base_mirror_version,
                         if task_state["State"] == 3:
                             failed = True
 
-                    if not running and failed:
-                        logger.error("creating mirror %s snapshot failed", mirrorname)
-                        mirror.mirror_state = "error"
-                        await build.set_publish_failed()
-                        session.commit()
-                        return
-                    if not running and not failed:
+                    if not running:
+                        if failed:
+                            logger.error("creating mirror %s snapshot failed", mirrorname)
+                            mirror.mirror_state = "error"
+                            await build.set_publish_failed()
+                            session.commit()
+                            return
                         break
 
                     await asyncio.sleep(2)
@@ -479,15 +470,16 @@ class AptlyWorker:
                 mirror_project = Project(name=mirror_name, is_mirror=True, is_basemirror=is_basemirror)
                 session.add(mirror_project)
 
-            project_version = (
+            if project_version := (
                 session.query(ProjectVersion)
                 .join(Project)
-                .filter(func.lower(Project.name) == mirror_name.lower(), Project.is_mirror.is_(True))
+                .filter(
+                    func.lower(Project.name) == mirror_name.lower(),
+                    Project.is_mirror.is_(True),
+                )
                 .filter(func.lower(ProjectVersion.name) == mirror_version.lower())
                 .first()
-            )
-
-            if project_version:
+            ):
                 logger.error("mirror with name '%s' and version '%s' already exists", mirror_name, mirror_version)
                 return False
 
@@ -563,8 +555,11 @@ class AptlyWorker:
 
             await build.logtitle("Create Mirror")
 
-            mirrorkey = session.query(MirrorKey).filter(MirrorKey.projectversion_id == mirror.id).first()
-            if mirrorkey:
+            if (
+                mirrorkey := session.query(MirrorKey)
+                .filter(MirrorKey.projectversion_id == mirror.id)
+                .first()
+            ):
                 key_url = mirrorkey.keyurl
                 keyids = db2array(mirrorkey.keyids)
                 keyserver = mirrorkey.keyserver
@@ -572,7 +567,7 @@ class AptlyWorker:
             if not mirror.external_repo:
                 aptly = get_aptly_connection()
                 if key_url:
-                    await build.log("I: adding GPG keys from {}\n".format(key_url))
+                    await build.log(f"I: adding GPG keys from {key_url}\n")
                     try:
                         await aptly.gpg_add_key(key_url=key_url)
                     except AptlyError as exc:
@@ -584,7 +579,7 @@ class AptlyWorker:
                         session.commit()
                         return False
                 elif keyserver and keyids:
-                    await build.log("I: adding GPG keys {} from {}\n".format(keyids, keyserver))
+                    await build.log(f"I: adding GPG keys {keyids} from {keyserver}\n")
                     try:
                         await aptly.gpg_add_key(key_server=keyserver, keys=keyids)
                     except AptlyError as exc:
@@ -668,7 +663,7 @@ class AptlyWorker:
                 await build.set_building()
                 session.commit()
 
-                mirror_name = "{}/{}".format(mirror.project.name, mirror.name)
+                mirror_name = f"{mirror.project.name}/{mirror.name}"
                 try:
                     await update_mirror(
                         build.id,
@@ -948,7 +943,7 @@ class AptlyWorker:
                                project_version, architectures).snapshot(snapshot_name, packages)
 
         # copy build logs
-        buildout_path = Configuration().working_dir + "/buildout"
+        buildout_path = f"{Configuration().working_dir}/buildout"
         for old, new in buildlogs:
             try:
                 mkdir(buildout_path + "/%d" % new)
@@ -1038,8 +1033,11 @@ class AptlyWorker:
                 # FIXME: remove buildout dir
                 session.delete(build)
 
-            mirrorkey = session.query(MirrorKey).filter(MirrorKey.projectversion_id == mirror.id).first()
-            if mirrorkey:
+            if (
+                mirrorkey := session.query(MirrorKey)
+                .filter(MirrorKey.projectversion_id == mirror.id)
+                .first()
+            ):
                 session.delete(mirrorkey)
             session.commit()
 
@@ -1065,10 +1063,7 @@ class AptlyWorker:
                 logger.error("aptly worker: build %d not found" % build_id)
                 return
 
-            dist = "stable"
-            if topbuild.is_ci:
-                dist = "unstable"
-
+            dist = "unstable" if topbuild.is_ci else "stable"
             srcpkgs = []
             debpkgs = []
             for src in topbuild.children:
@@ -1094,11 +1089,8 @@ class AptlyWorker:
                         # FIXME: only delete srcpkg if no other same build (repo, version, projectversion) has
                         # successful build in different arch
 
-                        repo_name = "%s-%s-%s-%s-%s" % (projectversion.basemirror.project.name, projectversion.basemirror.name,
-                                                        projectversion.project.name, projectversion.name, dist)
-                        publish_name = "{}_{}_repos_{}_{}".format(projectversion.basemirror.project.name,
-                                                                  projectversion.basemirror.name, projectversion.project.name,
-                                                                  projectversion.name)
+                        repo_name = f"{projectversion.basemirror.project.name}-{projectversion.basemirror.name}-{projectversion.project.name}-{projectversion.name}-{dist}"
+                        publish_name = f"{projectversion.basemirror.project.name}_{projectversion.basemirror.name}_repos_{projectversion.project.name}_{projectversion.name}"
                         if projectversion_id not in projectversions:
                             projectversions[projectversion_id] = (repo_name, publish_name)
                         if publish_name not in publish_names:
@@ -1112,16 +1104,15 @@ class AptlyWorker:
                     continue
                 for f in deb.debianpackages:
                     projectversion = deb.projectversion
-                    repo_name = "%s-%s-%s-%s-%s" % (projectversion.basemirror.project.name, projectversion.basemirror.name,
-                                                    projectversion.project.name, projectversion.name, dist)
+                    repo_name = f"{projectversion.basemirror.project.name}-{projectversion.basemirror.name}-{projectversion.project.name}-{projectversion.name}-{dist}"
                     if repo_name not in to_delete:
                         to_delete[repo_name] = []
                     to_delete[repo_name].append((f.name, deb.version, f.suffix))
 
         aptly = get_aptly_connection()
         aptly_delete = {}
-        for repo_name in to_delete:
-            for package in to_delete[repo_name]:
+        for repo_name, value in to_delete.items():
+            for package in value:
                 # logger.error("delete %s %s" % (repo_name, pkgname))
                 pkgs = await aptly.repo_packages_get(repo_name, "%s (= %s) {%s}" % (package[0],   # package name
                                                                                     package[1],   # version
@@ -1134,8 +1125,8 @@ class AptlyWorker:
             task_id = await aptly.repo_packages_delete(repo_name, aptly_delete[repo_name])
             await aptly.wait_task(task_id)
 
-        for pv in projectversions:
-            await aptly.republish(dist, projectversions[pv][0], projectversions[pv][1])
+        for pv, value_ in projectversions.items():
+            await aptly.republish(dist, value_[0], projectversions[pv][1])
 
         for bid in build_ids:
             buildout = "/var/lib/molior/buildout/%d" % bid
@@ -1152,8 +1143,7 @@ class AptlyWorker:
 
             to_delete = []
             for src in top.children:
-                for deb in src.children:
-                    to_delete.append(deb)
+                to_delete.extend(iter(src.children))
                 to_delete.append(src)
             to_delete.append(top)
 
@@ -1214,74 +1204,62 @@ class AptlyWorker:
 
                 handled = False
                 if not handled:
-                    args = task.get("src_publish")
-                    if args:
+                    if args := task.get("src_publish"):
                         handled = True
                         await self._src_publish(args)
 
                 if not handled:
-                    args = task.get("publish")
-                    if args:
+                    if args := task.get("publish"):
                         handled = True
                         await self._publish(args)
 
                 if not handled:
-                    args = task.get("create_mirror")
-                    if args:
+                    if args := task.get("create_mirror"):
                         handled = True
                         await self._create_mirror(args)
 
                 if not handled:
-                    args = task.get("init_mirror")
-                    if args:
+                    if args := task.get("init_mirror"):
                         handled = True
                         await self._init_mirror(args)
 
                 if not handled:
-                    args = task.get("update_mirror")
-                    if args:
+                    if args := task.get("update_mirror"):
                         handled = True
                         await self._update_mirror(args)
 
                 if not handled:
-                    args = task.get("drop_publish")
-                    if args:
+                    if args := task.get("drop_publish"):
                         handled = True
                         await self._drop_publish(args)
 
                 if not handled:
-                    args = task.get("init_repository")
-                    if args:
+                    if args := task.get("init_repository"):
                         handled = True
                         await self._init_repository(args)
 
                 if not handled:
-                    args = task.get("snapshot_repository")
-                    if args:
+                    if args := task.get("snapshot_repository"):
                         handled = True
                         await self._snapshot_repository(args)
 
                 if not handled:
-                    args = task.get("delete_repository")
-                    if args:
+                    if args := task.get("delete_repository"):
                         handled = True
                         await self._delete_repository(args)
 
                 if not handled:
-                    args = task.get("delete_mirror")
-                    if args:
+                    if args := task.get("delete_mirror"):
                         handled = True
                         await self._delete_mirror(args)
 
                 if not handled:
-                    args = task.get("delete_build")
-                    if args:
+                    if args := task.get("delete_build"):
                         handled = True
                         await self._delete_build(args)
 
                 if not handled:
-                    args = task.get("abort")
-                    if args:
+                    if args := task.get("abort"):
                         handled = True
                         await self._abort(args)
 

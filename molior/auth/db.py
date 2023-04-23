@@ -11,9 +11,14 @@ class AuthBackend:
 
     def login(self, username, password):
         with Session() as session:
-            user = session.query(User).filter(User.username == username.lower(),
-                                              User.password == func.crypt(password, User.password)).first()
-            if user:
+            if (
+                user := session.query(User)
+                .filter(
+                    User.username == username.lower(),
+                    User.password == func.crypt(password, User.password),
+                )
+                .first()
+            ):
                 return True
         return False
 

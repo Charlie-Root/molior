@@ -40,7 +40,7 @@ async def get_project_byname(request):
 
     project = request.cirrina.db_session.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
 
     data = {
         "id": project.id,
@@ -99,7 +99,9 @@ async def get_projectversions2(request):
     if project_id:
         query = query.filter(or_(func.lower(Project.name) == project_id.lower(), Project.id == parse_int(project_id)))
     if filter_name:
-        query = query.filter(ProjectVersion.name.ilike("%{}%".format(escape_for_like(filter_name))))
+        query = query.filter(
+            ProjectVersion.name.ilike(f"%{escape_for_like(filter_name)}%")
+        )
     if basemirror_id:
         query = query.filter(ProjectVersion.basemirror_id == basemirror_id)
     elif is_basemirror:
@@ -111,10 +113,7 @@ async def get_projectversions2(request):
     query = paginate(request, query)
     projectversions = query.all()
 
-    results = []
-    for projectversion in projectversions:
-        results.append(projectversion.data())
-
+    results = [projectversion.data() for projectversion in projectversions]
     data = {"total_result_count": nb_projectversions, "results": results}
 
     return OKResponse(data)
@@ -181,9 +180,9 @@ async def create_projectversion(request):
         return ErrorResponse(400, "No project id received")
     if not name:
         return ErrorResponse(400, "No name for the projectversion recieived")
-    if basemirror and not ("/" in basemirror):
+    if basemirror and "/" not in basemirror:
         return ErrorResponse(400, "No basemirror received (format: 'name/version')")
-    if baseproject and not ("/" in baseproject):
+    if baseproject and "/" not in baseproject:
         return ErrorResponse(400, "No baseproject received (format: 'name/version')")
     if not architectures:
         return ErrorResponse(400, "No architecture received")
@@ -198,16 +197,17 @@ async def create_projectversion(request):
     if not project and isinstance(project_id, int):
         project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
-        return ErrorResponse(400, "Project '{}' not found".format(project_id))
+        return ErrorResponse(400, f"Project '{project_id}' not found")
     if project.is_mirror:
         return ErrorResponse(400, "Cannot add projectversion to a mirror")
 
     projectversion = db.query(ProjectVersion).join(Project).filter(
             func.lower(ProjectVersion.name) == name.lower(), Project.id == project.id).first()
     if projectversion:
-        return ErrorResponse(400, "Projectversion '{}' already exists{}".format(
-                                        name,
-                                        ", and is marked as deleted" if projectversion.is_deleted else ""))
+        return ErrorResponse(
+            400,
+            f"""Projectversion '{name}' already exists{", and is marked as deleted" if projectversion.is_deleted else ""}""",
+        )
 
     bm = None
     pv = None
@@ -218,7 +218,10 @@ async def create_projectversion(request):
                 func.lower(Project.name) == baseproject_name.lower(),
                 func.lower(ProjectVersion.name) == baseproject_version.lower()).first()
         if not pv:
-            return ErrorResponse(400, "Base project not found: {}/{}".format(baseproject_name, baseproject_version))
+            return ErrorResponse(
+                400,
+                f"Base project not found: {baseproject_name}/{baseproject_version}",
+            )
         bm = pv.basemirror
     else:
         basemirror_name, basemirror_version = basemirror.split("/")
@@ -227,11 +230,14 @@ async def create_projectversion(request):
                 func.lower(Project.name) == basemirror_name.lower(),
                 func.lower(ProjectVersion.name) == basemirror_version.lower()).first()
         if not bm:
-            return ErrorResponse(400, "Base mirror not found: {}/{}".format(basemirror_name, basemirror_version))
+            return ErrorResponse(
+                400,
+                f"Base mirror not found: {basemirror_name}/{basemirror_version}",
+            )
 
     for arch in architectures:
         if arch not in db2array(bm.mirror_architectures):
-            return ErrorResponse(400, "Architecture not found in basemirror: {}".format(arch))
+            return ErrorResponse(400, f"Architecture not found in basemirror: {arch}")
 
     projectversion = ProjectVersion(
             name=name,
@@ -368,7 +374,7 @@ async def delete_project2(request):
 
     db.delete(project)
     db.commit()
-    return OKResponse("project {} deleted".format(project_name))
+    return OKResponse(f"project {project_name} deleted")
 
 
 @app.http_get("/api2/projectbase/{project_name}/permissions")
@@ -423,7 +429,7 @@ async def get_project_users2(request):
 
     project = db.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
     if project.is_mirror:
         return ErrorResponse(400, "Cannot get permissions from project which is a mirror")
 
@@ -435,7 +441,7 @@ async def get_project_users2(request):
         query = query.filter(User.username != "admin")
         query = query.filter(or_(UserRole.project_id.is_(None), Project.id != project.id))
         if filter_name:
-            query = query.filter(User.username.ilike("%{}%".format(escape_for_like(filter_name))))
+            query = query.filter(User.username.ilike(f"%{escape_for_like(filter_name)}%"))
         query = query.order_by(User.username)
         query = paginate(request, query)
         users = query.all()
@@ -452,7 +458,7 @@ async def get_project_users2(request):
     query = query.filter(Project.id == project.id)
 
     if filter_name:
-        query = query.filter(User.username.ilike("%{}%".format(escape_for_like(filter_name))))
+        query = query.filter(User.username.ilike(f"%{escape_for_like(filter_name)}%"))
 
     if filter_role:
         for r in USER_ROLES:
@@ -521,7 +527,7 @@ async def add_project_users2(request):
     db = request.cirrina.db_session
     project = db.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
     if project.is_mirror:
         return ErrorResponse(400, "Cannot set permissions to project which is a mirror")
 
@@ -589,7 +595,7 @@ async def edit_project_users2(request):
     db = request.cirrina.db_session
     project = db.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
     if project.is_mirror:
         return ErrorResponse(400, "Cannot edit permissions of project which is a mirror")
 
@@ -644,7 +650,7 @@ async def delete_project_users2(request):
     db = request.cirrina.db_session
     project = db.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
     if project.is_mirror:
         return ErrorResponse(400, "Cannot delete permissions from project which is a mirror")
 
@@ -672,12 +678,14 @@ async def get_tokens(request):
 
     project = request.cirrina.db_session.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
 
     query = request.cirrina.db_session.query(Authtoken).outerjoin(Authtoken_Project).outerjoin(Project)
     query = query.filter(Project.id == project.id)
     if description:
-        query = query.filter(Authtoken.description.ilike("%{}%".format(escape_for_like(description))))
+        query = query.filter(
+            Authtoken.description.ilike(f"%{escape_for_like(description)}%")
+        )
     query = paginate(request, query)
     tokens = query.all()
     data = {
@@ -704,7 +712,7 @@ async def create_token(request):
     db = request.cirrina.db_session
     project = db.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
     if project.is_mirror:
         return ErrorResponse(400, "Cannot create auth token for mirrors")
 
@@ -740,12 +748,12 @@ async def add_token(request):
     db = request.cirrina.db_session
     project = db.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
     if project.is_mirror:
         return ErrorResponse(400, "Cannot create auth token for mirrors")
     token = db.query(Authtoken).filter_by(description=description).first()
     if not token:
-        return ErrorResponse(404, "Authtoken '{}' not found".format(description))
+        return ErrorResponse(404, f"Authtoken '{description}' not found")
 
     # FIXME: check already added
 
@@ -769,7 +777,7 @@ async def delete_project_token(request):
     db = request.cirrina.db_session
     project = db.query(Project).filter_by(name=project_name).first()
     if not project:
-        return ErrorResponse(404, "Project {} not found".format(project_name))
+        return ErrorResponse(404, f"Project {project_name} not found")
 
     query = request.cirrina.db_session.query(Authtoken_Project)
     query = query.filter(Authtoken_Project.authtoken_id == token_id)
@@ -777,7 +785,7 @@ async def delete_project_token(request):
     token = query.first()
 
     if not token:
-        return ErrorResponse(404, "Token not found in {}".format(project_name))
+        return ErrorResponse(404, f"Token not found in {project_name}")
 
     # FIXME: delete Authtoken if not referenced by other projects
     db.delete(token)

@@ -95,15 +95,12 @@ async def get_project_users(request):
     )
 
     if filter_name:
-        query = query.filter(User.username.like("%{}%".format(filter_name)))
+        query = query.filter(User.username.like(f"%{filter_name}%"))
 
     if filter_role:
-        role = None
-        for i in USER_ROLES:
-            if i.find(filter_role.lower()) >= 0:
-                role = i
-                break
-        if role:
+        if role := next(
+            (i for i in USER_ROLES if i.find(filter_role.lower()) >= 0), None
+        ):
             query = query.filter(UserRole.role == role)
 
     query = paginate(request, query)
@@ -185,12 +182,11 @@ async def get_project_userrole(request):
     if not user:
         return web.Response(status=404, text="User not found")
 
-    rolerec = (
+    if rolerec := (
         request.cirrina.db_session.query(UserRole)
         .filter_by(project=project, user=user)
         .first()
-    )
-    if rolerec:
+    ):
         data["role"] = rolerec.role
 
     return web.json_response(data)
@@ -259,13 +255,11 @@ async def upsert_project_user_role(request):
     if not user:
         return web.Response(status=404, text="User not found")
 
-    rolerec = (
+    if rolerec := (
         request.cirrina.db_session.query(UserRole)
         .filter_by(project_id=project.id, user_id=user.id)
         .first()
-    )
-
-    if rolerec:
+    ):
         rolerec.role = user_role
     else:
         request.cirrina.db_session.add(

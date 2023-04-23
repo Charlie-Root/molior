@@ -14,18 +14,29 @@ from ..molior.queues import enqueue_task
 
 
 def get_last_gitref(repo, db):
-    last_build = db.query(Build).filter(Build.sourcerepository_id == repo.id,
-                                        Build.buildtype == "source").order_by(Build.id.desc()).first()
-    if last_build:
+    if (
+        last_build := db.query(Build)
+        .filter(
+            Build.sourcerepository_id == repo.id, Build.buildtype == "source"
+        )
+        .order_by(Build.id.desc())
+        .first()
+    ):
         return last_build.git_ref
     return None
 
 
 def get_last_build(db, projectversion, repository):
-    last_build = db.query(Build).filter(Build.sourcerepository_id == repository.id,
-                                        Build.projectversion_id == projectversion.id,
-                                        Build.buildtype == "deb").order_by(Build.id.desc()).first()
-    return last_build
+    return (
+        db.query(Build)
+        .filter(
+            Build.sourcerepository_id == repository.id,
+            Build.projectversion_id == projectversion.id,
+            Build.buildtype == "deb",
+        )
+        .order_by(Build.id.desc())
+        .first()
+    )
 
 
 def get_dependencies_by_sourcerepository(db_session, repository_id):
@@ -139,18 +150,13 @@ async def get_repositories(request):
 
     # Apply query filter
     if query:
-        name = query.get("name")
-        # TODO: Better SourceRepository filtering
-        if name:
+        if name := query.get("name"):
             repositories = repositories.filter(
-                SourceRepository.url.like("%/%{}%.git".format(name))
+                SourceRepository.url.like(f"%/%{name}%.git")
             )
 
-        url = query.get("url")
-        if url:
-            repositories = repositories.filter(
-                SourceRepository.url.like("%{}%".format(url))
-            )
+        if url := query.get("url"):
+            repositories = repositories.filter(SourceRepository.url.like(f"%{url}%"))
 
     if "url" in distinct:
         repositories = repositories.distinct(SourceRepository.url)
@@ -185,31 +191,34 @@ async def get_repositories(request):
         }
         if projectversion:
             build = get_last_build(request.cirrina.db_session, projectversion, repository)
-            repoinfo.update({
-                "projectversion": {
+            repoinfo["projectversion"] = {
+                "id": projectversion.id,
+                "name": projectversion.project.name,
+                "version": projectversion.name,
+                "last_gitref": get_last_gitref(
+                    request.cirrina.db_session, repository
+                ),
+                "architectures": get_architectures(
+                    request.cirrina.db_session, repository, projectversion
+                ),
+                "last_build": {
+                    "id": build.id,
+                    "version": build.version,
+                    "buildstate": build.buildstate,
+                },
+            }
+        else:
+            repoinfo["projectversions"] = [
+                {
                     "id": projectversion.id,
                     "name": projectversion.project.name,
                     "version": projectversion.name,
-                    "last_gitref": get_last_gitref(request.cirrina.db_session, repository),
-                    "architectures": get_architectures(request.cirrina.db_session, repository, projectversion),
-                    "last_build": {
-                        "id": build.id,
-                        "version": build.version,
-                        "buildstate": build.buildstate
-                    }
+                    # "last_gitref": get_last_gitref(
+                    #     request.cirrina.db_session, repository, projectversion
+                    # ),
                 }
-            })
-        else:
-            repoinfo.update({"projectversions": [{
-                        "id": projectversion.id,
-                        "name": projectversion.project.name,
-                        "version": projectversion.name,
-                        # "last_gitref": get_last_gitref(
-                        #     request.cirrina.db_session, repository, projectversion
-                        # ),
-                    }
-                    for projectversion in repository.projectversions
-                ]})
+                for projectversion in repository.projectversions
+            ]
         data["results"].append(repoinfo)
     return web.json_response(data)
 

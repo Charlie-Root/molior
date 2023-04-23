@@ -180,8 +180,7 @@ async def process_tag_push(request, data):
     logger.debug("GitLab-API: TAG_PUSH (user_email): %s", user_email)
 
     repository_url = ""
-    project = data.get("project")
-    if project:
+    if project := data.get("project"):
         project_name = project.get("name")
         logger.info("GitLab-API: TAG_PUSH (project_name): %s", project_name)
 
@@ -202,12 +201,9 @@ async def process_tag_push(request, data):
             repository_url = url
 
     if not repository_url:
-        repository = data.get("repository")
-        if repository:
+        if repository := data.get("repository"):
             url = repository.get("url")
-            git_ssl_url = repository.get("git_ssl_url")
-
-            if git_ssl_url:
+            if git_ssl_url := repository.get("git_ssl_url"):
                 repository_url = git_ssl_url
             elif url:
                 repository_url = url
@@ -291,9 +287,7 @@ async def process_push(request, data):
     logger.info("GitLab-API: PUSH (checkout_sha): %s", checkout_sha)
 
     repository_url = ""
-    project = data.get("project")
-    if project:
-
+    if project := data.get("project"):
         project_ssh_url = project.get("ssh_url")
         logger.debug("GitLab-API: PUSH (project_ssh_url): %s", project_ssh_url)
 
@@ -314,8 +308,7 @@ async def process_push(request, data):
             repository_url = project_url
 
     if not repository_url:
-        repository = data.get("repository")
-        if repository:
+        if repository := data.get("repository"):
             repository_urlx = repository.get("url")
             logger.debug("GitLab-API: PUSH (repository_urlx): %s", repository_urlx)
 

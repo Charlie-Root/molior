@@ -68,12 +68,10 @@ async def get_projectversions(request):
 
     query = db.query(ProjectVersion).join(Project).filter(ProjectVersion.is_deleted.is_(False))
 
-    exclude_id = parse_int(exclude_id)
-    if exclude_id:
+    if exclude_id := parse_int(exclude_id):
         query = query.filter(Project.id != exclude_id)
 
-    project_id = parse_int(project_id)
-    if project_id:
+    if project_id := parse_int(project_id):
         query = query.filter(Project.id == project_id)
 
     if project_name:
@@ -85,24 +83,30 @@ async def get_projectversions(request):
             if not term:
                 continue
             term = escape_for_like(term)
-            query = query.filter(or_(
-                 Project.name.ilike("%{}%".format(term)),
-                 ProjectVersion.name.ilike("%{}%".format(term))))
+            query = query.filter(
+                or_(
+                    Project.name.ilike(f"%{term}%"),
+                    ProjectVersion.name.ilike(f"%{term}%"),
+                )
+            )
 
     if basemirror_id:
         query = query.filter(ProjectVersion.base_mirror_id == basemirror_id)
+    elif is_basemirror:
+        query = query.filter(Project.is_basemirror.is_(True), ProjectVersion.mirror_state == "ready")
     else:
-        if is_basemirror:
-            query = query.filter(Project.is_basemirror.is_(True), ProjectVersion.mirror_state == "ready")
-        else:
-            query = query.filter(Project.is_mirror.is_(False))
+        query = query.filter(Project.is_mirror.is_(False))
 
     if dependant_id:
         logger.info("dependant_id")
-        p_version = db.query(ProjectVersion).filter(ProjectVersion.id == dependant_id).first()
-        projectversions = []
-        if p_version:
+        if (
+            p_version := db.query(ProjectVersion)
+            .filter(ProjectVersion.id == dependant_id)
+            .first()
+        ):
             projectversions = [p_version.basemirror]
+        else:
+            projectversions = []
         nb_projectversions = len(projectversions)
     else:
         query = query.order_by(func.lower(Project.name), func.lower(ProjectVersion.name))
@@ -160,8 +164,11 @@ async def get_projectversion(request):
     deps = get_projectversion_deps(projectversion.id, db)
     projectversion_dict["dependencies"] = []
     for d in deps:
-        dep = db.query(ProjectVersion).filter(ProjectVersion.id == d[0]).first()
-        if dep:
+        if (
+            dep := db.query(ProjectVersion)
+            .filter(ProjectVersion.id == d[0])
+            .first()
+        ):
             projectversion_dict["dependencies"].append(dep.data())
 
     projectversion_dict["basemirror_url"] = str()
@@ -228,7 +235,7 @@ async def create_projectversions(request):
         return ErrorResponse(400, "No valid project id received")
     if not name:
         return ErrorResponse(400, "No valid name for the projectversion received")
-    if not basemirror or not ("/" in basemirror):
+    if not basemirror or "/" not in basemirror:
         return ErrorResponse(400, "No valid basemirror received (format: 'name/version')")
     if not architectures:
         return ErrorResponse(400, "No valid architecture received")
@@ -243,20 +250,25 @@ async def create_projectversions(request):
     project = db.query(Project).filter(Project.name == project_id).first()
     if not project:
         project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            return ErrorResponse(400, "Project '{}' could not be found".format(project_id))
+    if not project:
+        return ErrorResponse(400, f"Project '{project_id}' could not be found")
 
     projectversion = db.query(ProjectVersion).filter(func.lower(ProjectVersion.name) == name.lower(),
                                                      Project.id == project.id).first()
     if projectversion:
-        return ErrorResponse(400, "Projectversion already exists{}".format(
-                ", and is marked as deleted!" if projectversion.is_deleted else ""))
+        return ErrorResponse(
+            400,
+            f'Projectversion already exists{", and is marked as deleted!" if projectversion.is_deleted else ""}',
+        )
 
     basemirror = db.query(ProjectVersion).join(Project).filter(
             func.lower(Project.name) == basemirror_name.lower(),
             func.lower(ProjectVersion.name) == basemirror_version.lower()).first()
     if not basemirror:
-        return ErrorResponse(400, "Base mirror not found: {}/{}".format(basemirror_name, basemirror_version))
+        return ErrorResponse(
+            400,
+            f"Base mirror not found: {basemirror_name}/{basemirror_version}",
+        )
 
     projectversion = ProjectVersion(name=name, project=project, mirror_architectures=array2db(architectures),
                                     basemirror=basemirror, description=description, dependency_policy=dependency_policy)
@@ -318,7 +330,9 @@ async def delete_repository(request):
 
     projectversion = db.query(ProjectVersion).filter(ProjectVersion.id == projectversion_id).first()
     if not projectversion:
-        return ErrorResponse(400, "Projectversion {} could not been found.".format(projectversion_id))
+        return ErrorResponse(
+            400, f"Projectversion {projectversion_id} could not been found."
+        )
     if projectversion.is_locked:
         return ErrorResponse(400, "Projectversion is locked")
 
@@ -327,7 +341,9 @@ async def delete_repository(request):
 
     sourcerepository = db.query(SourceRepository).filter(SourceRepository.id == sourcerepository_id).first()
     if not sourcerepository:
-        return ErrorResponse(400, "Sourcerepository {} could not been found".format(sourcerepository_id))
+        return ErrorResponse(
+            400, f"Sourcerepository {sourcerepository_id} could not been found"
+        )
 
     # get the association of the projectversion and the sourcerepository
     sourcerepositoryprojectversion = db.query(SouRepProVer).filter(SouRepProVer.sourcerepository_id == sourcerepository_id,
@@ -379,9 +395,11 @@ async def create_projectversion_overlay(request):
     params = await request.json()
     name = params.get("name")
     projectversion_id = parse_int(request.match_info["projectversion_id"])
-    if not projectversion_id:
-        return ErrorResponse(400, "No valid project id received")
-    return await do_overlay(request, projectversion_id, name)
+    return (
+        await do_overlay(request, projectversion_id, name)
+        if projectversion_id
+        else ErrorResponse(400, "No valid project id received")
+    )
 
 
 async def do_overlay(request, projectversion_id, name):
@@ -477,7 +495,7 @@ async def post_projectversion_toggle_ci(request):
                 projectversion.project.name,
                 projectversion.name)
 
-    return OKResponse("Ci builds are now {}.".format(result))
+    return OKResponse(f"Ci builds are now {result}.")
 
 
 @app.http_post("/api/projectversions/{projectversion_id}/lock")
@@ -592,11 +610,13 @@ async def mark_delete_projectversion(request):
         blocking_dependants = []
         for d in projectversion.dependents:
             if not d.is_deleted:
-                blocking_dependants.append("{}/{}".format(d.project.name, d.name))
+                blocking_dependants.append(f"{d.project.name}/{d.name}")
         if blocking_dependants:
             logger.error("projectversion mark delete: projectversion_id %d still has dependency %d", projectversion_id, d.id)
-            return ErrorResponse(400, "Projectversions '{}' are still depending on this version, cannot delete it".format(
-                                  ", ".join(blocking_dependants)))
+            return ErrorResponse(
+                400,
+                f"""Projectversions '{", ".join(blocking_dependants)}' are still depending on this version, cannot delete it""",
+            )
 
     base_mirror_name = projectversion.basemirror.project.name
     base_mirror_version = projectversion.basemirror.name
@@ -678,23 +698,28 @@ async def delete_projectversion_dependency(request):
 
     projectversion = db.query(ProjectVersion).filter(ProjectVersion.id == projectversion_id).first()
     if not projectversion:
-        return ErrorResponse(400, "Could not find projectversion with id: {}".format(projectversion_id))
+        return ErrorResponse(
+            400, f"Could not find projectversion with id: {projectversion_id}"
+        )
 
     if projectversion.is_locked:
         return ErrorResponse(400, "Cannot delete dependencies on a locked projectversion")
 
     dependency = db.query(ProjectVersion).filter(ProjectVersion.id == dependency_id).first()
     if not dependency:
-        return ErrorResponse(400, "Could not find projectversion dependency with id: {}".format(dependency_id))
+        return ErrorResponse(
+            400,
+            f"Could not find projectversion dependency with id: {dependency_id}",
+        )
 
     projectversion.dependencies.remove(dependency)
 
-    pv_name = "{}/{}".format(projectversion.project.name, projectversion.name)
-    dep_name = "{}/{}".format(dependency.project.name, dependency.name)
+    pv_name = f"{projectversion.project.name}/{projectversion.name}"
+    dep_name = f"{dependency.project.name}/{dependency.name}"
 
     db.commit()
     logger.info("ProjectVersionDependency '%s -> %s' deleted", pv_name, dep_name)
-    return OKResponse("Deleted dependency from {} to {}".format(pv_name, dep_name))
+    return OKResponse(f"Deleted dependency from {pv_name} to {dep_name}")
 
 
 @app.http_post("/api/projectversions/{projectversion_id}/dependency")

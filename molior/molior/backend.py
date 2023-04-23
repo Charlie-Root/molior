@@ -22,7 +22,7 @@ class Backend:
 
         logger.info("loading backend: %s", plugin)
         try:
-            module = importlib.import_module(".backends.%s" % plugin, package="molior")
+            module = importlib.import_module(f".backends.{plugin}", package="molior")
             loop = asyncio.get_event_loop()
             Backend.backend = module.backend(loop)
         except Exception as exc:

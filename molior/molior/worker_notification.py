@@ -32,13 +32,11 @@ class NotificationWorker:
                 if task is None:
                     break
 
-                notification = task.get("notify")
-                if notification:
+                if notification := task.get("notify"):
                     await app.websocket_broadcast(notification)
                     handled = True
 
-                notification = task.get("hooks")
-                if notification:
+                if notification := task.get("hooks"):
                     await self.do_hooks(notification.get("build_id"))
                     handled = True
 
@@ -55,13 +53,13 @@ class NotificationWorker:
         with Session() as session:
             build = session.query(Build).filter(Build.id == build_id).first()
             if not build:
-                logger.error("hooks: build {} not found".format(build_id))
+                logger.error(f"hooks: build {build_id} not found")
                 return
 
             maintainer = build.maintainer
 
             cfg_host = Configuration().hostname
-            hostname = cfg_host if cfg_host else socket.getfqdn()
+            hostname = cfg_host or socket.getfqdn()
 
             class ResultObject:
                 pass
@@ -75,8 +73,8 @@ class NotificationWorker:
             buildres.id = build.id
             buildres.status = build.buildstate
             buildres.version = build.version
-            buildres.url = "http://{}/build/{}".format(hostname, build.id)
-            buildres.raw_log_url = "http://{}/buildout/{}/build.log".format(hostname, build.id)
+            buildres.url = f"http://{hostname}/build/{build.id}"
+            buildres.raw_log_url = f"http://{hostname}/buildout/{build.id}/build.log"
             buildres.commit = build.git_ref
             buildres.branch = build.ci_branch
 
@@ -147,11 +145,11 @@ class NotificationWorker:
                 method = hook.method
                 skip_ssl = hook.skip_ssl
 
-                logger.info("adding hook: %s" % url)
+                logger.info(f"adding hook: {url}")
                 hooks.append((method, url, skip_ssl, body))
 
         for hook in hooks:
             try:
                 await trigger_hook(hook[0], hook[1], skip_ssl=hook[2], body=hook[3])
             except Exception as exc:
-                logger.error("hook: error calling {} '{}': {}".format(hook[0], hook[1], exc))
+                logger.error(f"hook: error calling {hook[0]} '{hook[1]}': {exc}")

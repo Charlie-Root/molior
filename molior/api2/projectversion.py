@@ -70,14 +70,14 @@ async def get_projectversion2(request):
     produces:
         - text/json
     """
-    projectversion = get_projectversion(request)
-    if not projectversion:
+    if projectversion := get_projectversion(request):
+        return (
+            ErrorResponse(400, "Projectversion is mirror")
+            if projectversion.project.is_mirror
+            else OKResponse(projectversion.data())
+        )
+    else:
         return ErrorResponse(400, "Projectversion not found")
-
-    if projectversion.project.is_mirror:
-        return ErrorResponse(400, "Projectversion is mirror")
-
-    return OKResponse(projectversion.data())
 
 
 @app.http_get("/api2/project/{project_id}/{projectversion_id}/dependencies")
@@ -136,7 +136,11 @@ async def get_projectversion_dependencies(request):
                                                       ProjectVersion.id != projectversion.id,
                                                       ProjectVersion.id.notin_(dep_ids))
         if filter_name:
-            cands_query = cands_query.filter(ProjectVersion.fullname.ilike("%{}%".format(escape_for_like(filter_name))))
+            cands_query = cands_query.filter(
+                ProjectVersion.fullname.ilike(
+                    f"%{escape_for_like(filter_name)}%"
+                )
+            )
 
         BaseMirror = aliased(ProjectVersion)
         dist_query = db.query(ProjectVersion).join(BaseMirror, BaseMirror.id == ProjectVersion.basemirror_id).filter(
@@ -146,14 +150,22 @@ async def get_projectversion_dependencies(request):
                                                    ProjectVersion.id.notin_(dep_ids))
 
         if filter_name:
-            dist_query = dist_query.filter(ProjectVersion.fullname.ilike("%{}%".format(escape_for_like(filter_name))))
+            dist_query = dist_query.filter(
+                ProjectVersion.fullname.ilike(
+                    f"%{escape_for_like(filter_name)}%"
+                )
+            )
 
         any_query = db.query(ProjectVersion).filter(
                                                    ProjectVersion.dependency_policy == "any",
                                                    ProjectVersion.id != projectversion.id,
                                                    ProjectVersion.id.notin_(dep_ids))
         if filter_name:
-            any_query = any_query.filter(ProjectVersion.fullname.ilike("%{}%".format(escape_for_like(filter_name))))
+            any_query = any_query.filter(
+                ProjectVersion.fullname.ilike(
+                    f"%{escape_for_like(filter_name)}%"
+                )
+            )
 
         # cands = cands_query.union(dist_query, any_query).join(Project).order_by(Project.is_mirror,
         #                                                                         func.lower(Project.name),
@@ -163,15 +175,9 @@ async def get_projectversion_dependencies(request):
 
         # for cand in cands.all():
 
-        for cand in cands_query.all():
-            results.append(cand.data())
-
-        for cand in dist_query.all():
-            results.append(cand.data())
-
-        for cand in any_query.all():
-            results.append(cand.data())
-
+        results.extend(cand.data() for cand in cands_query.all())
+        results.extend(cand.data() for cand in dist_query.all())
+        results.extend(cand.data() for cand in any_query.all())
         data = {"total_result_count": len(results), "results": results}
         return OKResponse(data)
 
@@ -185,9 +191,8 @@ async def get_projectversion_dependencies(request):
     for d in deps_unique:
         dep = db.query(ProjectVersion).filter(ProjectVersion.id == d.id)
         if filter_name:
-            dep = dep.filter(ProjectVersion.fullname.ilike("%{}%".format(filter_name)))
-        dep = dep.first()
-        if dep:
+            dep = dep.filter(ProjectVersion.fullname.ilike(f"%{filter_name}%"))
+        if dep := dep.first():
             data = dep.data()
             results.append(data)
 
@@ -338,7 +343,9 @@ async def delete_projectversion_dependency(request):
     if projectversion.is_locked:
         return ErrorResponse(400, "Projectversion is locked")
 
-    dependency = get_projectversion_byname(dependency_name + "/" + dependency_version, db)
+    dependency = get_projectversion_byname(
+        f"{dependency_name}/{dependency_version}", db
+    )
     if not dependency:
         return ErrorResponse(400, "Dependency not found")
 
@@ -387,9 +394,9 @@ async def copy_projectversion(request):
         return ErrorResponse(400, "No valid name for the projectversion received")
     if not is_name_valid(new_version):
         return ErrorResponse(400, "Invalid project name!")
-    if basemirror and not ("/" in basemirror):
+    if basemirror and "/" not in basemirror:
         return ErrorResponse(400, "No valid basemirror received (format: 'name/version')")
-    if baseproject and not ("/" in baseproject):
+    if baseproject and "/" not in baseproject:
         return ErrorResponse(400, "No valid baseproject received (format: 'name/version')")
     if not architectures:
         return ErrorResponse(400, "No architecture received")
@@ -414,7 +421,10 @@ async def copy_projectversion(request):
                 func.lower(Project.name) == baseproject_name.lower(),
                 func.lower(ProjectVersion.name) == baseproject_version.lower()).first()
         if not pv:
-            return ErrorResponse(400, "Base project not found: {}/{}".format(baseproject_name, baseproject_version))
+            return ErrorResponse(
+                400,
+                f"Base project not found: {baseproject_name}/{baseproject_version}",
+            )
         bm = pv.basemirror
     else:
         basemirror_name, basemirror_version = basemirror.split("/")
@@ -423,7 +433,10 @@ async def copy_projectversion(request):
                 func.lower(Project.name) == basemirror_name.lower(),
                 func.lower(ProjectVersion.name) == basemirror_version.lower()).first()
         if not bm:
-            return ErrorResponse(400, "Base mirror not found: {}/{}".format(basemirror_name, basemirror_version))
+            return ErrorResponse(
+                400,
+                f"Base mirror not found: {basemirror_name}/{basemirror_version}",
+            )
 
     new_projectversion = projectversion.copy(db, new_version, description, dependency_policy, bm.id, architectures, cibuilds)
 
@@ -493,13 +506,14 @@ async def lock_projectversion(request):
     produces:
         - text/json
     """
-    projectversion = get_projectversion(request)
-    if not projectversion:
+    if projectversion := get_projectversion(request):
+        return (
+            ErrorResponse(400, "Projectversion is based on external mirror")
+            if projectversion.basemirror.external_repo
+            else do_lock(request, projectversion.id)
+        )
+    else:
         return ErrorResponse(400, "Projectversion not found")
-    if projectversion.basemirror.external_repo:
-        return ErrorResponse(400, "Projectversion is based on external mirror")
-
-    return do_lock(request, projectversion.id)
 
 
 @app.http_post("/api2/project/{project_id}/{projectversion_id}/unlock")
@@ -524,13 +538,14 @@ async def unlock_projectversion(request):
     produces:
         - text/json
     """
-    projectversion = get_projectversion(request)
-    if not projectversion:
+    if projectversion := get_projectversion(request):
+        return (
+            ErrorResponse(400, "Projectversion is based on external mirror")
+            if projectversion.basemirror.external_repo
+            else do_unlock(request, projectversion.id)
+        )
+    else:
         return ErrorResponse(400, "Projectversion not found")
-    if projectversion.basemirror.external_repo:
-        return ErrorResponse(400, "Projectversion is based on external mirror")
-
-    return do_unlock(request, projectversion.id)
 
 
 @app.http_post("/api2/project/{project_id}/{projectversion_id}/overlay")
@@ -559,10 +574,11 @@ async def overlay_projectversion(request):
 
     name = params.get("name")
     projectversion = get_projectversion(request)
-    if not projectversion:
-        return ErrorResponse(400, "Projectversion not found")
-
-    return await do_overlay(request, projectversion.id, name)
+    return (
+        await do_overlay(request, projectversion.id, name)
+        if projectversion
+        else ErrorResponse(400, "Projectversion not found")
+    )
 
 
 @app.http_post("/api2/project/{project_id}/{projectversion_id}/snapshot")
@@ -588,12 +604,15 @@ async def snapshot_projectversion(request):
     if db.query(ProjectVersion).join(Project).filter(
             func.lower(ProjectVersion.name) == name.lower(),
             Project.id == projectversion.project_id).first():
-        return ErrorResponse(400, "Projectversion '%s' already exists" % name)
+        return ErrorResponse(400, f"Projectversion '{name}' already exists")
 
     # check dependencies are locked
     for dep in projectversion.dependencies:
         if not dep.is_locked:
-            return ErrorResponse(400, "Dependency '%s/%s' is not locked" % (dep.project.name, dep.name))
+            return ErrorResponse(
+                400,
+                f"Dependency '{dep.project.name}/{dep.name}' is not locked",
+            )
 
     # get top level build for each latest build
     latest_builds = latest_project_builds(db, projectversion.id)
@@ -606,10 +625,13 @@ async def snapshot_projectversion(request):
             if debbuild.projectversion_id != projectversion.id:
                 continue
             if not debbuild.debianpackages:
-                return ErrorResponse(400, "No debian packages found for %s/%s" % (debbuild.sourcename, debbuild.version))
+                return ErrorResponse(
+                    400,
+                    f"No debian packages found for {debbuild.sourcename}/{debbuild.version}",
+                )
             latest_debbuilds_ids.append(debbuild.id)
 
-    if len(latest_debbuilds_ids) == 0:
+    if not latest_debbuilds_ids:
         return ErrorResponse(400, "No snapshotable builds found")
 
     new_projectversion = ProjectVersion(
@@ -700,7 +722,7 @@ async def delete_projectversion(request):
     projectversion.is_deleted = True
     projectversion.is_locked = True
     projectversion.ci_builds_enabled = False
-    projectversion.name = projectversion.name + "-deleted"
+    projectversion.name = f"{projectversion.name}-deleted"
     db.commit()
 
     # delete deb builds and parents if needed
@@ -818,7 +840,9 @@ async def remove_repository2(request):
 
     sourcerepository = db.query(SourceRepository).filter(SourceRepository.id == sourcerepository_id).first()
     if not sourcerepository:
-        return ErrorResponse(400, "Sourcerepository {} could not been found".format(sourcerepository_id))
+        return ErrorResponse(
+            400, f"Sourcerepository {sourcerepository_id} could not been found"
+        )
 
     # get the association of the projectversion and the sourcerepository
     sourcerepositoryprojectversion = db.query(SouRepProVer).filter(SouRepProVer.sourcerepository_id == sourcerepository_id,
@@ -877,15 +901,14 @@ async def get_apt_sources2(request):
     deps += get_projectversion_deps(projectversion.id, db)
 
     cfg = Configuration()
-    apt_url = None
-    if not internal:
-        apt_url = cfg.aptly.get("apt_url_public")
+    apt_url = None if internal else cfg.aptly.get("apt_url_public")
     if not apt_url:
         apt_url = cfg.aptly.get("apt_url")
     keyfile = cfg.aptly.get("key")
 
-    sources_list = "# APT Sources for project {0} {1}\n".format(projectversion.project.name, projectversion.name)
-    sources_list += "# GPG-Key: {0}/{1}\n".format(apt_url, keyfile)
+    sources_list = "# APT Sources for project {0} {1}\n".format(
+        projectversion.project.name, projectversion.name
+    ) + "# GPG-Key: {0}/{1}\n".format(apt_url, keyfile)
     if not projectversion.project.is_basemirror and projectversion.basemirror:
         sources_list += "\n# Base Mirror\n"
         sources_list += "{}\n".format(projectversion.basemirror.get_apt_repo(internal=internal))
@@ -961,12 +984,8 @@ async def get_projectversion_dependents(request):
 
     # get existing dependents
     deps = projectversion.dependents
-    dep_ids = []
-    for d in deps:
-        dep_ids.append(d.id)
-
+    dep_ids = [d.id for d in deps]
     if candidates:  # return candidate dependents
-        results = []
         cands_query = db.query(ProjectVersion).filter(ProjectVersion.basemirror_id == projectversion.basemirror_id,
                                                       ProjectVersion.id != projectversion.id,
                                                       ProjectVersion.id.notin_(dep_ids))
@@ -985,11 +1004,9 @@ async def get_projectversion_dependents(request):
                                                                                 func.lower(Project.name),
                                                                                 func.lower(ProjectVersion.name))
         if filter_name:
-            cands = cands.filter(ProjectVersion.fullname.ilike("%{}%".format(filter_name)))
+            cands = cands.filter(ProjectVersion.fullname.ilike(f"%{filter_name}%"))
 
-        for cand in cands.all():
-            results.append(cand.data())
-
+        results = [cand.data() for cand in cands.all()]
         data = {"total_result_count": len(results), "results": results}
         return OKResponse(data)
 
@@ -998,9 +1015,8 @@ async def get_projectversion_dependents(request):
     for d in deps:
         dep = db.query(ProjectVersion).filter(ProjectVersion.id == d.id)
         if filter_name:
-            dep = dep.filter(ProjectVersion.fullname.ilike("%{}%".format(filter_name)))
-        dep = dep.first()
-        if dep:
+            dep = dep.filter(ProjectVersion.fullname.ilike(f"%{filter_name}%"))
+        if dep := dep.first():
             data = dep.data()
             results.append(data)
 
@@ -1101,7 +1117,7 @@ async def external_build_upload(request):
         dir_path = buildout_path / str(build_id)
         if not dir_path.is_dir():
             dir_path.mkdir(parents=True)
-        async with AIOFile("%s/%s" % (dir_path, filename), "xb") as afp:
+        async with AIOFile(f"{dir_path}/{filename}", "xb") as afp:
             writer = Writer(afp)
             while True:  # FIXME: timeout
                 # FIXME: might not return, timeout and cancel
@@ -1263,7 +1279,7 @@ async def external_build_upload(request):
                                             Build.sourcename == sourcename,
                                             Build.version == build_version).first()
     if existing_build:
-        errmsg = "build for %s/%s already exists" % (sourcename, version)
+        errmsg = f"build for {sourcename}/{version} already exists"
         await build.log("E: %s\n" % errmsg)
         await build.set_failed()
         await build.logtitle("Done", no_footer_newline=True, no_header_newline=False)
@@ -1323,26 +1339,22 @@ async def delete_projectversion_build(request):
 
     topbuild = None
     builds = []
-    if build.buildtype == "deb":
+    if build.buildtype == "build":
+        topbuild = build
+        builds.append(topbuild)
+        for b in topbuild.children:
+            builds.append(b)
+            builds.extend(iter(b.children))
+    elif build.buildtype == "deb":
         topbuild = build.parent.parent
         builds.extend([build.parent, build.parent.parent])
-        for b in build.parent.children:
-            builds.append(b)
+        builds.extend(iter(build.parent.children))
     elif build.buildtype == "source":
         topbuild = build.parent
         builds.extend([build, build.parent])
-        for b in build.children:
-            builds.append(b)
-    elif build.buildtype == "build":
-        topbuild = build
-        builds.append(build)
-        for b in build.children:
-            builds.append(b)
-            for c in b.children:
-                builds.append(c)
-
+        builds.extend(iter(build.children))
     if not topbuild:
-        return ErrorResponse(400, "Build of type %s cannot be deleted" % build.buildtype)
+        return ErrorResponse(400, f"Build of type {build.buildtype} cannot be deleted")
 
     for srcbuild in topbuild.children:
         for debbuild in srcbuild.children:
@@ -1353,11 +1365,16 @@ async def delete_projectversion_build(request):
             if debbuild.projectversion and debbuild.projectversion.is_locked:
                 return ErrorResponse(400, "Build from locked projectversion cannot be deleted")
 
-            if debbuild.buildstate == "scheduled" or \
-               debbuild.buildstate == "building" or \
-               debbuild.buildstate == "needs_publish" or \
-               debbuild.buildstate == "publishing":
-                return ErrorResponse(400, "Build in state %s cannot be deleted" % debbuild.buildstate)
+            if debbuild.buildstate in [
+                "scheduled",
+                "building",
+                "needs_publish",
+                "publishing",
+            ]:
+                return ErrorResponse(
+                    400,
+                    f"Build in state {debbuild.buildstate} cannot be deleted",
+                )
 
     for b in builds:
         b.is_deleted = True

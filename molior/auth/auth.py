@@ -34,7 +34,7 @@ class Auth:
 
         logger.info("loading auth_backend: %s", plugin)
         try:
-            module = importlib.import_module(".auth.%s" % plugin, package="molior")
+            module = importlib.import_module(f".auth.{plugin}", package="molior")
             auth_backend = module.AuthBackend()
         except Exception as exc:
             logger.error("error loading auth_backend plugin '%s'", plugin)
@@ -44,33 +44,37 @@ class Auth:
 
     def login(self, user, password):
         global auth_backend
-        if not auth_backend:
-            return False
-        return auth_backend.login(user, password)
+        return auth_backend.login(user, password) if auth_backend else False
 
     def add_user(self, username, password, email, is_admin):
         global auth_backend
         if not auth_backend:
             return False
-        if not hasattr(auth_backend, "add_user"):
-            return False
-        return auth_backend.add_user(username, password, email, is_admin)
+        return (
+            auth_backend.add_user(username, password, email, is_admin)
+            if hasattr(auth_backend, "add_user")
+            else False
+        )
 
     def edit_user(self, user_id, password, email, is_admin):
         global auth_backend
         if not auth_backend:
             return False
-        if not hasattr(auth_backend, "edit_user"):
-            return False
-        return auth_backend.edit_user(user_id, password, email, is_admin)
+        return (
+            auth_backend.edit_user(user_id, password, email, is_admin)
+            if hasattr(auth_backend, "edit_user")
+            else False
+        )
 
     def delete_user(self, user_id):
         global auth_backend
         if not auth_backend:
             return False
-        if not hasattr(auth_backend, "delete_user"):
-            return False
-        return auth_backend.delete_user(user_id)
+        return (
+            auth_backend.delete_user(user_id)
+            if hasattr(auth_backend, "delete_user")
+            else False
+        )
 
 
 @app.auth_handler
@@ -140,19 +144,19 @@ async def authenticate_token(request, *kw):
     if not auth_token:
         return False
     token = None
-    project_name = request.match_info.get("project_name")
-    if project_name:
-        p = request.cirrina.db_session.query(Project).filter(func.lower(Project.name) == project_name.lower()).first()
-        if p:
+    if project_name := request.match_info.get("project_name"):
+        if (
+            p := request.cirrina.db_session.query(Project)
+            .filter(func.lower(Project.name) == project_name.lower())
+            .first()
+        ):
             project_id = p.id
         query = request.cirrina.db_session.query(Authtoken).join(Authtoken_Project)
         query = query.filter(Authtoken_Project.project_id == project_id, Authtoken.token == auth_token)
-        token = query.first()
     else:
         query = request.cirrina.db_session.query(Authtoken)
         query = query.filter(Authtoken.token == auth_token)
-        token = query.first()
-
+    token = query.first()
     return token is not None
 
 
@@ -288,10 +292,7 @@ def check_user_role(web_session, db_session, project_id, role, allow_admin=True)
 
     roles = [role] if isinstance(role, str) else role
 
-    if "any" in roles or role_rec.role in roles:
-        return True
-
-    return False
+    return "any" in roles or role_rec.role in roles
 
 
 class req_role(object):

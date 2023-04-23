@@ -20,7 +20,7 @@ from ..model.debianpackage import Debianpackage
 
 def get_debchanges_filename(sourcepath, sourcename, version, arch="source"):
     v = strip_epoch_version(version)
-    return "{}/{}_{}_{}.changes".format(sourcepath, sourcename, v, arch)
+    return f"{sourcepath}/{sourcename}_{v}_{arch}.changes"
 
 
 async def debchanges_get_files(sourcepath, sourcename, version, arch="source"):
@@ -32,15 +32,14 @@ async def debchanges_get_files(sourcepath, sourcename, version, arch="source"):
             file_tag = False
             for line in str(data, 'utf-8').split('\n'):
                 line = line.rstrip()
-                if not file_tag:
-                    if line == "Files:":
-                        file_tag = True
-                else:
+                if file_tag:
                     if not line.startswith(" "):
                         break
                     line = line.lstrip()
                     parts = line.split(" ")
                     files.append(parts[4])
+                elif line == "Files:":
+                    file_tag = True
     except Exception as exc:
         logger.exception(exc)
     return files
@@ -85,7 +84,7 @@ async def DebSrcPublish(build_id, repo_id, sourcename, version, projectversions,
     publish_files = []
     for f in srcfiles:
         await buildlog(build_id, " - %s\n" % f)
-        publish_files.append("{}/{}".format(sourcepath, f))
+        publish_files.append(f"{sourcepath}/{f}")
 
     add_files(build_id, buildtype, version, srcfiles)
 
@@ -93,8 +92,11 @@ async def DebSrcPublish(build_id, repo_id, sourcename, version, projectversions,
     for projectversion_id in projectversions:
         fullname = None
         with Session() as session:
-            projectversion = session.query(ProjectVersion).filter(ProjectVersion.id == projectversion_id) .first()
-            if projectversion:
+            if (
+                projectversion := session.query(ProjectVersion)
+                .filter(ProjectVersion.id == projectversion_id)
+                .first()
+            ):
                 fullname = projectversion.fullname
                 basemirror_name = projectversion.basemirror.project.name
                 basemirror_version = projectversion.basemirror.name
@@ -103,8 +105,11 @@ async def DebSrcPublish(build_id, repo_id, sourcename, version, projectversions,
                 archs = db2array(projectversion.mirror_architectures)
 
         if not fullname:
-            logger.error("publisher: error finding projectversion {}".format(projectversion_id))
-            await buildlog(build_id, "E: error finding projectversion {}\n".format(projectversion_id))
+            logger.error(f"publisher: error finding projectversion {projectversion_id}")
+            await buildlog(
+                build_id,
+                f"E: error finding projectversion {projectversion_id}\n",
+            )
             continue
 
         await buildlog(build_id, "I: publishing for project %s\n" % fullname)
@@ -236,8 +241,11 @@ async def DebPublish(build_id, buildtype, sourcename, version, architecture, is_
         return False
     finally:
         with Session() as session:
-            buildtask = session.query(BuildTask).filter(BuildTask.build_id == build_id).first()
-            if buildtask:
+            if (
+                buildtask := session.query(BuildTask)
+                .filter(BuildTask.build_id == build_id)
+                .first()
+            ):
                 session.delete(buildtask)
                 session.commit()
     return True
@@ -256,12 +264,12 @@ def add_files(build_id, buildtype, version, files):
 
         if buildtype == "deb":
             if len(p) != 3:
-                logger.error("build: unknown debian package file: {}".format(f))
+                logger.error(f"build: unknown debian package file: {f}")
                 continue
             name, version, suffix = p
             s = suffix.split(".", 2)
             if len(s) != 2:
-                logger.error("build: cannot add file: {}".format(f))
+                logger.error(f"build: cannot add file: {f}")
                 continue
             arch, ext = s
             suffix = arch
@@ -272,7 +280,7 @@ def add_files(build_id, buildtype, version, files):
             if len(p) == 3:  # $pkg_$ver_source.buildinfo
                 continue
             if len(p) != 2:
-                logger.error("build: unknown source package file: {}".format(f))
+                logger.error(f"build: unknown source package file: {f}")
                 continue
 
             name, suffix = p
@@ -281,7 +289,7 @@ def add_files(build_id, buildtype, version, files):
             if suffix.endswith("dsc") or suffix.endswith("source.buildinfo"):
                 continue
 
-        key = "%s_%s:" % (name, suffix)
+        key = f"{name}_{suffix}:"
         if key not in packages.keys():
             packages[key] = (name, suffix)
 

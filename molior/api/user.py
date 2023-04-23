@@ -78,9 +78,9 @@ async def get_users(request):
     if admin.lower() == "true":
         query = query.filter(User.is_admin)
     if name:
-        query = query.filter(User.username.ilike("%{}%".format(name)))
+        query = query.filter(User.username.ilike(f"%{name}%"))
     if email:
-        query = query.filter(User.email.ilike("%{}%".format(email)))
+        query = query.filter(User.email.ilike(f"%{email}%"))
 
     query = query.order_by(User.username)
     data = {"total_result_count": query.count()}
@@ -203,15 +203,16 @@ async def put_user_byid(request):
         return ErrorResponse(400, "Incorrect value for user_id")
 
     ret = Auth().edit_user(user_id, password, email, is_admin)
-    if not ret:
-        return ErrorResponse(400, "Error modifying user")
-    return web.Response(status=200)
+    return (
+        web.Response(status=200)
+        if ret
+        else ErrorResponse(400, "Error modifying user")
+    )
 
 
 @app.http_delete("/api/user/{user_id}")
 @app.http_delete("/api/users/{user_id}")
 @req_admin
-# FIXME: req_role
 async def delete_user_byid(request):
     """
     Delete a user by id.
@@ -248,9 +249,11 @@ async def delete_user_byid(request):
         return ErrorResponse(400, "Incorrect value for user_id")
 
     ret = Auth().delete_user(user_id)
-    if not ret:
-        return ErrorResponse(400, "Error deleting user")
-    return web.Response(status=200)
+    return (
+        web.Response(status=200)
+        if ret
+        else ErrorResponse(400, "Error deleting user")
+    )
 
 
 @app.http_get("/api/users/{user_id}/roles")

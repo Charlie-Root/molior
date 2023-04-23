@@ -60,7 +60,7 @@ async def get_status(request):
     apt_url = cfg.aptly.get("apt_url_public")
     if not apt_url:
         apt_url = cfg.aptly.get("apt_url")
-    gpgurl = apt_url + "/" + cfg.aptly.get("key")
+    gpgurl = f"{apt_url}/" + cfg.aptly.get("key")
     status = {
         "version_molior_server": MOLIOR_VERSION,
         "version_aptly": aptly_version,
@@ -115,9 +115,7 @@ async def set_maintenance(request):
         request.cirrina.db_session.execute(
             query, {"key": "maintenance_mode", "maintenance_mode": maintenance_mode}
         )
-        status.update(
-            {"maintenance_mode": True if maintenance_mode == "true" else False}
-        )
+        status["maintenance_mode"] = maintenance_mode == "true"
 
     maintenance_message = params.get("maintenance_message")
     if maintenance_message != "":
@@ -126,7 +124,7 @@ async def set_maintenance(request):
             query,
             {"key": "maintenance_message", "maintenance_message": maintenance_message},
         )
-        status.update({"maintenance_message": maintenance_message})
+        status["maintenance_message"] = maintenance_message
 
     return web.json_response(status)
 

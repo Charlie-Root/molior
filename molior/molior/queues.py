@@ -123,23 +123,18 @@ async def buildlogtitle(build_id, title, no_footer_newline=False, no_header_newl
     now = get_local_tz().localize(datetime.now(), is_dst=None)
     date = datetime.strftime(now, "%a, %d %b %Y %H:%M:%S %z")
 
-    header_newline = "\n"
-    if no_header_newline:
-        header_newline = ""
-
-    footer_newline = "\n"
-    if no_footer_newline:
-        footer_newline = ""
-
-    color = 36
-    if error:
-        color = 31
-
+    header_newline = "" if no_header_newline else "\n"
+    footer_newline = "" if no_footer_newline else "\n"
+    color = 31 if error else 36
     BORDER = 80 * "+"
 
-    msg = "{}\x1b[{}m\x1b[1m{}\x1b[0m\n".format(header_newline, color, BORDER) + \
-          "\x1b[{}m\x1b[1m| molior: {:36} {} |\x1b[0m\n".format(color, title, date) + \
-          "\x1b[{}m\x1b[1m{}\x1b[0m\n{}".format(color, BORDER, footer_newline)
+    msg = (
+        f"{header_newline}\x1b[{color}m\x1b[1m{BORDER}\x1b[0m\n"
+        + "\x1b[{}m\x1b[1m| molior: {:36} {} |\x1b[0m\n".format(
+            color, title, date
+        )
+        + f"\x1b[{color}m\x1b[1m{BORDER}\x1b[0m\n{footer_newline}"
+    )
 
     await buildlog(build_id, msg)
 

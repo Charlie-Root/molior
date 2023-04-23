@@ -84,10 +84,14 @@ class Build(Base):
         self.buildendstamp = None
         await self.build_changed()
 
-        if self.buildtype == "deb":
-            if self.parent and self.parent.parent and not self.parent.parent.buildstate == "building":
-                self.parent.parent.endstamp = None
-                await self.parent.parent.set_building()
+        if (
+            self.buildtype == "deb"
+            and self.parent
+            and self.parent.parent
+            and self.parent.parent.buildstate != "building"
+        ):
+            self.parent.parent.endstamp = None
+            await self.parent.parent.set_building()
 
     async def set_scheduled(self):
         self.log_state("scheduled")
@@ -110,7 +114,11 @@ class Build(Base):
         await self.build_changed()
 
         if self.buildtype == "deb":
-            if self.parent and self.parent.parent and not self.parent.parent.buildstate == "build_failed":
+            if (
+                self.parent
+                and self.parent.parent
+                and self.parent.parent.buildstate != "build_failed"
+            ):
                 await self.parent.parent.set_failed()
                 await self.parent.parent.logtitle("Done", no_footer_newline=True, no_header_newline=False)
                 await self.parent.parent.logdone()
@@ -137,7 +145,10 @@ class Build(Base):
         await self.build_changed()
 
         if self.buildtype == "deb":
-            if self.parent.parent and not self.parent.parent.buildstate == "build_failed":
+            if (
+                self.parent.parent
+                and self.parent.parent.buildstate != "build_failed"
+            ):
                 await self.parent.parent.set_failed()
                 await self.parent.parent.logtitle("Done", no_footer_newline=True, no_header_newline=False)
                 await self.parent.parent.logdone()
@@ -207,57 +218,55 @@ class Build(Base):
             # project_id = None
             is_locked = None
 
-        if is_locked:
-            return False
-
-#        if project_id:
-#            return check_user_role(web_session, db_session, project_id, ["member", "owner"])
-
-        return True
+        return not is_locked
 
     def data(self):
         data = {
             "id": self.id,
             "parent_id": self.parent_id,
-            # circular dep "can_rebuild": self.can_rebuild(request.cirrina.web_session, request.cirrina.db_session),
             "buildstate": self.buildstate,
             "buildtype": self.buildtype,
-            "startstamp": self.startstamp.strftime(DATETIME_FORMAT) if self.startstamp else "",
-            "endstamp": self.endstamp.strftime(DATETIME_FORMAT) if self.endstamp else "",
+            "startstamp": self.startstamp.strftime(DATETIME_FORMAT)
+            if self.startstamp
+            else "",
+            "endstamp": self.endstamp.strftime(DATETIME_FORMAT)
+            if self.endstamp
+            else "",
             "version": self.version,
             "sourcename": self.sourcename,
-            "maintainer": ("{} {}".format(self.maintainer.firstname, self.maintainer.surname)
-                           if self.maintainer else ""),
-            "maintainer_email": (self.maintainer.email if self.maintainer else ""),
+            "maintainer": f"{self.maintainer.firstname} {self.maintainer.surname}"
+            if self.maintainer
+            else "",
+            "maintainer_email": self.maintainer.email if self.maintainer else "",
             "git_ref": self.git_ref,
             "branch": self.ci_branch,
-            "architecture": self.architecture
+            "architecture": self.architecture,
         }
 
         if self.projectversion:
             pv = self.projectversion
             if pv.project.is_mirror:
                 if self.buildtype == "mirror":
-                    data.update({"architectures": db2array(pv.mirror_architectures)})
-            elif self.buildtype == "deb" or self.buildtype == "chroot":
-                data.update({"architecture": self.architecture})
-                data.update({
+                    data["architectures"] = db2array(pv.mirror_architectures)
+            elif self.buildtype in ["deb", "chroot"]:
+                data["architecture"] = self.architecture
+                data |= {
                     "project": {
                         "name": pv.project.name,
                         "version": pv.name,
-                        },
+                    },
                     "buildvariant": {
                         "architecture": self.architecture,
                         "base_mirror": {
                             "name": pv.basemirror.project.name,
-                            "version": pv.basemirror.name
-                            },
-                        "name": pv.basemirror.project.name + "-" + pv.basemirror.name + "/" + self.architecture
-                        }
-                    })
+                            "version": pv.basemirror.name,
+                        },
+                        "name": f"{pv.basemirror.project.name}-{pv.basemirror.name}/{self.architecture}",
+                    },
+                }
 
         if self.sourcerepository:
-            data.update({"sourcerepository_id": self.sourcerepository.id})
+            data["sourcerepository_id"] = self.sourcerepository.id
 
         return data
 
@@ -285,11 +294,12 @@ class Build(Base):
         if self.buildtype != "deb":  # only run hooks for deb builds
             return
 
-        if (
-           self.buildstate != "building"  # only send building, ok, nok
-           and self.buildstate != "successful"
-           and self.buildstate != "build_failed"
-           and self.buildstate != "publish_failed"):
+        if self.buildstate not in [
+            "building",
+            "successful",
+            "build_failed",
+            "publish_failed",
+        ]:
             return
 
         await run_hooks(self.id)
@@ -298,7 +308,7 @@ class Build(Base):
 def build_logstate(build_id, buildtype, sourcename, version, statemsg):
     prefix = buildtype
     name = sourcename
-    if buildtype == "build":
+    if prefix == "build":
         prefix = "task"
     if not build_id:
         build_id = -1

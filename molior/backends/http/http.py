@@ -13,21 +13,13 @@ registry = {"amd64": [], "arm64": []}
 running_nodes = {"amd64": [], "arm64": []}
 
 cfg = Configuration()
-pt = cfg.backend_http.get("ping_timeout")
-if pt:
-    PING_TIMEOUT = int(pt)
-else:
-    PING_TIMEOUT = 5
+PING_TIMEOUT = int(pt) if (pt := cfg.backend_http.get("ping_timeout")) else 5
 
 
 async def watchdog(ws_client):
     try:
         arch = ws_client.molior_node_arch
-        while True:
-            # stop if disconnected
-            if ws_client not in registry[arch] and ws_client not in running_nodes[arch]:
-                break
-
+        while ws_client in registry[arch] or ws_client in running_nodes[arch]:
             # was pong recieved ?
             if hasattr(ws_client, "molior_pong_pending") and ws_client.molior_pong_pending == 1:
                 logger.warning("backend: ping timeout after %ds on %s/%s",
@@ -126,7 +118,7 @@ async def node_message(ws_client, msg):
             ws_client.molior_sourcearch = ""
 
         elif status["status"] == "success":
-            logger.debug("node: finished build {}".format(build_id))
+            logger.debug(f"node: finished build {build_id}")
             await enqueue_backend({"succeeded": build_id})
             if ws_client in running_nodes[arch]:
                 running_nodes[arch].remove(ws_client)
@@ -183,9 +175,9 @@ class HTTPBackend:
     async def build(self, build_id, token, build_version, apt_server, arch, arch_any_only, distrelease_name, distrelease_version,
                     project_dist, sourcename, project_name, project_version, apt_urls, apt_keys, run_lintian=True):
         task_id = "build_%d" % build_id
-        if arch == "i386" or arch == "amd64":
+        if arch in ["i386", "amd64"]:
             queue_arch = "amd64"
-        elif arch == "armhf" or arch == "arm64":
+        elif arch in ["armhf", "arm64"]:
             queue_arch = "arm64"
         else:
             logger.error("backend: invalid build architecture '%s'", arch)
@@ -222,8 +214,8 @@ class HTTPBackend:
         # FIXME: lock both dicts on every access
         build_nodes = []
         for arch in registry:
-            for node in registry[arch]:
-                build_nodes.append({
+            build_nodes.extend(
+                {
                     "name": node.molior_node_name,
                     "arch": arch,
                     "state": "idle",
@@ -239,11 +231,13 @@ class HTTPBackend:
                     "client_ver": node.molior_client_ver,
                     "sourcename": node.molior_sourcename,
                     "sourceversion": node.molior_sourceversion,
-                    "sourcearch": node.molior_sourcearch
-                })
+                    "sourcearch": node.molior_sourcearch,
+                }
+                for node in registry[arch]
+            )
         for arch in running_nodes:
-            for node in running_nodes[arch]:
-                build_nodes.append({
+            build_nodes.extend(
+                {
                     "name": node.molior_node_name,
                     "arch": arch,
                     "state": "busy",
@@ -259,8 +253,10 @@ class HTTPBackend:
                     "client_ver": node.molior_client_ver,
                     "sourcename": node.molior_sourcename,
                     "sourceversion": node.molior_sourceversion,
-                    "sourcearch": node.molior_sourcearch
-                })
+                    "sourcearch": node.molior_sourcearch,
+                }
+                for node in running_nodes[arch]
+            )
         return build_nodes
 
     async def stop(self):
@@ -328,19 +324,23 @@ class HTTPBackend:
             for arch in running_nodes:
                 nodes.extend(running_nodes[arch])
 
-            data = []
-            for node in nodes:
-                data.append({
+            data = [
+                {
                     "id": node.molior_nodeid,
-                    "state": "busy" if node in running_nodes["amd64"] or node in running_nodes["arm64"] else "idle",
+                    "state": "busy"
+                    if node in running_nodes["amd64"]
+                    or node in running_nodes["arm64"]
+                    else "idle",
                     "uptime_seconds": node.molior_uptime_seconds,
                     "load": node.molior_load,
                     "ram_used": node.molior_ram_used,
                     "disk_used": node.molior_disk_used,
                     "sourcename": node.molior_sourcename,
                     "sourceversion": node.molior_sourceversion,
-                    "sourcearch": node.molior_sourcearch
-                    })
+                    "sourcearch": node.molior_sourcearch,
+                }
+                for node in nodes
+            ]
             await notify(Subject.node.value, Event.changed.value, data)
             try:
                 await asyncio.sleep(4)

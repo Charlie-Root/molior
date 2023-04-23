@@ -55,8 +55,11 @@ async def get_mirror2(request):
     mirrorkeyurl = ""
     mirrorkeyids = ""
     mirrorkeyserver = ""
-    mirrorkey = request.cirrina.db_session.query(MirrorKey).filter(MirrorKey.projectversion_id == mirror.id).first()
-    if mirrorkey:
+    if (
+        mirrorkey := request.cirrina.db_session.query(MirrorKey)
+        .filter(MirrorKey.projectversion_id == mirror.id)
+        .first()
+    ):
         mirrorkeyurl = mirrorkey.keyurl
         if mirrorkey.keyids:
             mirrorkeyids = mirrorkey.keyids[1:-1]
@@ -69,7 +72,7 @@ async def get_mirror2(request):
     if not mirror.project.is_basemirror and mirror.basemirror:
         basemirror_id = mirror.basemirror.id
         basemirror_url = mirror.basemirror.get_apt_repo(url_only=True)
-        basemirror_name = mirror.basemirror.project.name + "/" + mirror.basemirror.name
+        basemirror_name = f"{mirror.basemirror.project.name}/{mirror.basemirror.name}"
 
     result = {
         "id": mirror.id,
@@ -163,10 +166,7 @@ async def get_projectversion_dependents(request):
     dependents += mirror.dependents
     nb_results += len(mirror.dependents)
 
-    results = []
-    for dependent in dependents:
-        results.append(dependent.data())
-
+    results = [dependent.data() for dependent in dependents]
     data = {"total_result_count": nb_results, "results": results}
     return OKResponse(data)
 
@@ -213,20 +213,20 @@ async def get_apt_sources2(request):
         apt_url = cfg.aptly.get("apt_url")
     keyfile = cfg.aptly.get("key")
 
-    sources_list = "# APT Sources for mirror {0} {1}\n".format(name, version)
-    sources_list += "# GPG-Key: {0}/{1}\n\n".format(apt_url, keyfile)
+    sources_list = "# APT Sources for mirror {0} {1}\n".format(
+        name, version
+    ) + "# GPG-Key: {0}/{1}\n\n".format(apt_url, keyfile)
     if mirror.project.is_basemirror:
-        sources_list += "{}\n".format(mirror.get_apt_repo())
+        sources_list += f"{mirror.get_apt_repo()}\n"
     elif mirror.basemirror:
-        sources_list += "{}\n".format(mirror.basemirror.get_apt_repo())
-        sources_list += "{}\n".format(mirror.get_apt_repo())
+        sources_list += f"{mirror.basemirror.get_apt_repo()}\n"
+        sources_list += f"{mirror.get_apt_repo()}\n"
 
     return web.Response(status=200, text=sources_list)
 
 
 @app.http_post("/api2/mirror")
 @req_admin
-# FIXME: req_role
 async def create_mirror2(request):
     """
     Create a debian mirror.
@@ -338,11 +338,18 @@ async def create_mirror2(request):
     mirrorcomponents = re.split(r"[, ]", mirrorcomponents)
 
     db = request.cirrina.db_session
-    mirror = db.query(ProjectVersion).join(Project).filter(
-                func.lower(ProjectVersion.name) == mirrorversion.lower(),
-                func.lower(Project.name) == mirrorname.lower()).first()
-    if mirror:
-        return ErrorResponse(400, "Mirror {}/{} already exists".format(mirrorname, mirrorversion))
+    if (
+        mirror := db.query(ProjectVersion)
+        .join(Project)
+        .filter(
+            func.lower(ProjectVersion.name) == mirrorversion.lower(),
+            func.lower(Project.name) == mirrorname.lower(),
+        )
+        .first()
+    ):
+        return ErrorResponse(
+            400, f"Mirror {mirrorname}/{mirrorversion} already exists"
+        )
 
     basemirror_id = None
     if mirrortype == "2":
@@ -403,7 +410,6 @@ async def create_mirror2(request):
 
 @app.http_put("/api2/mirror/{name}/{version}")
 @req_admin
-# FIXME: req_role
 async def edit_mirror(request):
     """
     Edit a debian mirror.
@@ -500,11 +506,11 @@ async def edit_mirror(request):
                 func.lower(ProjectVersion.name) == mirror_version.lower(),
                 func.lower(Project.name) == mirror_name.lower()).first()
     if not mirror:
-        return ErrorResponse(400, "Mirror not found {}/{}".format(mirror_name, mirror_version))
+        return ErrorResponse(400, f"Mirror not found {mirror_name}/{mirror_version}")
 
     mirrorkey = db.query(MirrorKey).filter(MirrorKey.projectversion_id == mirror.id).first()
     if not mirrorkey:
-        return ErrorResponse(400, "Mirror keys not found for mirror {}".format(mirror.id))
+        return ErrorResponse(400, f"Mirror keys not found for mirror {mirror.id}")
 
     if mirror.is_locked:
         return ErrorResponse(400, "Mirror is locked")
@@ -571,7 +577,6 @@ async def edit_mirror(request):
 
 @app.http_delete("/api2/mirror/{name}/{version}")
 @req_admin
-# FIXME: req_role
 async def delete_mirror2(request):
     """
     Delete a single mirror on aptly and from database.
@@ -604,35 +609,45 @@ async def delete_mirror2(request):
                 func.lower(Project.name) == mirror_name.lower(),
                 Project.is_mirror.is_(True)).first()
     if not mirror:
-        return ErrorResponse(400, "Mirror not found {}/{}".format(mirror_name, mirror_version))
+        return ErrorResponse(400, f"Mirror not found {mirror_name}/{mirror_version}")
 
     # FIXME: check state, do not delete ready/updating/...
 
-    mirrorname = "{}-{}".format(mirror.project.name, mirror.name)
+    mirrorname = f"{mirror.project.name}-{mirror.name}"
 
     # check relations
     if mirror.sourcerepositories:
         logger.warning("error deleting mirror '%s': referenced by one or more source repositories", mirrorname)
-        return ErrorResponse(412, "Error deleting mirror {}: still referenced from source repositories".format(mirrorname))
+        return ErrorResponse(
+            412,
+            f"Error deleting mirror {mirrorname}: still referenced from source repositories",
+        )
     # FIXME: how to check build references
     # if mirror.buildconfiguration:
     #    logger.warning("error deleting mirror '%s': referenced by one or more build configurations", mirrorname)
     #    return ErrorResponse(412, "Error deleting mirror {}: still referenced from build configurations".format(mirrorname))
     if mirror.dependents:
         logger.warning("error deleting mirror '%s': referenced by one or more project versions", mirrorname)
-        return ErrorResponse(412, "Error deleting mirror {}: still referenced from project versions".format(mirrorname))
+        return ErrorResponse(
+            412,
+            f"Error deleting mirror {mirrorname}: still referenced from project versions",
+        )
 
-    if mirror.project.is_basemirror:
-        dependents = db.query(ProjectVersion).filter(ProjectVersion.basemirror_id == mirror.id).all()
-        if dependents:
+    if (
+        dependents := db.query(ProjectVersion)
+        .filter(ProjectVersion.basemirror_id == mirror.id)
+        .all()
+    ):
+        if mirror.project.is_basemirror:
             logger.warning("error deleting mirror '%s': used as basemirror by one or more project versions", mirrorname)
-            return ErrorResponse(412,
-                                 "Error deleting mirror {}: still used as base mirror by one or more project versions".format(
-                                     mirrorname))
+            return ErrorResponse(
+                412,
+                f"Error deleting mirror {mirrorname}: still used as base mirror by one or more project versions",
+            )
 
     mirror.is_deleted = True
     db.commit()
     args = {"delete_mirror": [mirror.id]}
     await enqueue_aptly(args)
 
-    return OKResponse("Successfully deleted mirror: {}".format(mirrorname))
+    return OKResponse(f"Successfully deleted mirror: {mirrorname}")

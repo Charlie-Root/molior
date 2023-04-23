@@ -164,7 +164,7 @@ async def get_builds(request):
     if to_date:
         builds = builds.filter(Build.startstamp < to_date)
     if distrelease:
-        builds = builds.filter(Project.name.ilike("%{}%".format(distrelease)))
+        builds = builds.filter(Project.name.ilike(f"%{distrelease}%"))
 
 #    if buildvariant:
 #        buildvariant_ids = [
@@ -192,11 +192,13 @@ async def get_builds(request):
         for term in terms:
             if not term:
                 continue
-            builds = builds.filter(or_(
-                Build.sourcename.ilike("%{}%".format(term)),
-                Build.version.ilike("%{}%".format(term)),
-                Build.architecture.ilike("%{}%".format(term)),
-                ))
+            builds = builds.filter(
+                or_(
+                    Build.sourcename.ilike(f"%{term}%"),
+                    Build.version.ilike(f"%{term}%"),
+                    Build.architecture.ilike(f"%{term}%"),
+                )
+            )
 
     if search_project:
         builds = builds.join(ProjectVersion).join(Project)
@@ -204,10 +206,13 @@ async def get_builds(request):
         for term in terms:
             if not term:
                 continue
-            builds = builds.filter(Project.is_mirror.is_(False), or_(
-                ProjectVersion.name.ilike("%{}%".format(term)),
-                Project.name.ilike("%{}%".format(term)),
-                ))
+            builds = builds.filter(
+                Project.is_mirror.is_(False),
+                or_(
+                    ProjectVersion.name.ilike(f"%{term}%"),
+                    Project.name.ilike(f"%{term}%"),
+                ),
+            )
 
     projectversion = None
     if project:
@@ -229,16 +234,22 @@ async def get_builds(request):
 
     # FIXME:
     if version:
-        builds = builds.filter(Build.version.like("%{}%".format(version)))
+        builds = builds.filter(Build.version.like(f"%{version}%"))
     if maintainer:
-        builds = builds.filter(Maintainer.fullname.ilike("%{}%".format(maintainer)))
+        builds = builds.filter(Maintainer.fullname.ilike(f"%{maintainer}%"))
     if commit:
-        builds = builds.filter(Build.git_ref.like("%{}%".format(commit)))
+        builds = builds.filter(Build.git_ref.like(f"%{commit}%"))
     if architecture:
-        builds = builds.filter(Build.architecture.like("%{}%".format(architecture)))
+        builds = builds.filter(Build.architecture.like(f"%{architecture}%"))
     if sourcerepository_name:
-        builds = builds.filter(or_(Build.sourcename.like("%{}%.format(sourcerepository_name)"),
-                                   Build.sourcerepository.url.like("%/%{}%.git".format(sourcerepository_name))))
+        builds = builds.filter(
+            or_(
+                Build.sourcename.like("%{}%.format(sourcerepository_name)"),
+                Build.sourcerepository.url.like(
+                    f"%/%{sourcerepository_name}%.git"
+                ),
+            )
+        )
     if startstamp:
         builds = builds.filter(func.to_char(Build.startstamp, "YYYY-MM-DD HH24:MI:SS").contains(startstamp))
     if buildstates and set(buildstates).issubset(set(BUILD_STATES)):
@@ -312,9 +323,7 @@ async def get_build(request):
 
     maintainer = str()
     if build.maintainer:
-        maintainer = "{} {}".format(
-            build.maintainer.firstname, build.maintainer.surname
-        )
+        maintainer = f"{build.maintainer.firstname} {build.maintainer.surname}"
 
     project = {}
     if build.projectversion:
@@ -342,15 +351,11 @@ async def get_build(request):
     }
 
     if build.sourcerepository:
-        data.update(
-            {
-                "sourcerepository": {
-                    "name": build.sourcerepository.name,
-                    "url": build.sourcerepository.url,
-                    "id": build.sourcerepository.id,
-                }
-            }
-        )
+        data["sourcerepository"] = {
+            "name": build.sourcerepository.name,
+            "url": build.sourcerepository.url,
+            "id": build.sourcerepository.id,
+        }
 
     if build.projectversion:
         basemirror_name = ""
@@ -362,21 +367,17 @@ async def get_build(request):
             basemirror_version = build.projectversion.basemirror.name
             if build.architecture:
                 arch = build.architecture
-            buildvariant = basemirror_name + "-" + basemirror_version + "/" + arch
-        data.update(
-            {
-                "buildvariant": {
-                    "architecture": {
-                        "name": build.architecture,
-                    },
-                    "base_mirror": {
-                        "name": basemirror_name,
-                        "version": basemirror_version
-                    },
-                    "name": buildvariant
-                }
-            }
-        )
+            buildvariant = f"{basemirror_name}-{basemirror_version}/{arch}"
+        data["buildvariant"] = {
+            "architecture": {
+                "name": build.architecture,
+            },
+            "base_mirror": {
+                "name": basemirror_name,
+                "version": basemirror_version,
+            },
+            "name": buildvariant,
+        }
 
     return web.json_response(data)
 
@@ -489,7 +490,9 @@ async def trigger_build(request):
     if not repo:
         return web.Response(text="Repo not found", status=400)
 
-    repo.log_state("build triggered: %s, branch=%s, force_ci=%s, targets=%s" % (git_ref, git_branch, force_ci, str(targets)))
+    repo.log_state(
+        f"build triggered: {git_ref}, branch={git_branch}, force_ci={force_ci}, targets={str(targets)}"
+    )
 
     build = Build(
         version=None,
@@ -546,8 +549,6 @@ async def get_build_info(request):
     except (ValueError, TypeError):
         return web.Response(text="Incorrect value for build_id", status=400)
 
-    data = {}
-
     query = """
 WITH RECURSIVE descendants AS (
     SELECT build.id, build.parent_id, 0 depth
@@ -562,10 +563,7 @@ SELECT *
 FROM descendants order by id;
 """
     result = request.cirrina.db_session.execute(query, {"build_id": build_id})
-    build_tree_ids = []
-    for row in result:
-        build_tree_ids.append((row[0], row[1], row[2]))
-
+    build_tree_ids = [(row[0], row[1], row[2]) for row in result]
     toplevel = None
     parents = {}
     for row in build_tree_ids:
@@ -584,12 +582,10 @@ FROM descendants order by id;
                     parent["childs"] = []
                 parent["childs"].append(buildjson)
             else:
-                logger.info("build tree: parent {} not found".format(build.parent_id))
+                logger.info(f"build tree: parent {build.parent_id} not found")
 
         if depth == 0:
             toplevel = build_id
 
-    if toplevel:
-        data = parents[toplevel]
-
+    data = parents[toplevel] if toplevel else {}
     return web.json_response(data)

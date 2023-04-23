@@ -62,14 +62,17 @@ class BackendWorker:
             if outcome:  # build successful
                 await build.set_needs_publish()
                 await enqueue_aptly({"publish": [build_id]})
-            else:        # build failed
+            else:# build failed
                 await build.parent.parent.log("I: build for %s %s failed\n" % (build.projectversion.fullname, build.sourcename))
                 await build.set_failed()
                 await buildlogdone(build.id)
                 session.commit()
 
-                buildtask = session.query(BuildTask).filter(BuildTask.build == build).first()
-                if buildtask:
+                if (
+                    buildtask := session.query(BuildTask)
+                    .filter(BuildTask.build == build)
+                    .first()
+                ):
                     session.delete(buildtask)
                     session.commit()
 
@@ -93,36 +96,28 @@ class BackendWorker:
 
             try:
                 handled = False
-                job = task.get("schedule")
-                if job:
+                if job := task.get("schedule"):
                     handled = True
                     await self._schedule(job)
-                build_id = task.get("abort")
-                if build_id:
+                if build_id := task.get("abort"):
                     handled = True
                     await self._abort(build_id)
-                build_id = task.get("started")
-                if build_id:
+                if build_id := task.get("started"):
                     handled = True
                     await self._started(build_id)
-                build_id = task.get("succeeded")
-                if build_id:
+                if build_id := task.get("succeeded"):
                     handled = True
                     await self._succeeded(build_id)
-                build_id = task.get("failed")
-                if build_id:
+                if build_id := task.get("failed"):
                     handled = True
                     await self._failed(build_id)
-                build_id = task.get("terminate")
-                if build_id:
+                if build_id := task.get("terminate"):
                     handled = True
                     await self._terminate(build_id)
-                build_id = task.get("logging_done")
-                if build_id:
+                if build_id := task.get("logging_done"):
                     handled = True
                     await self._logging_done(build_id)
-                node_dummy = task.get("node_registered")
-                if node_dummy:
+                if node_dummy := task.get("node_registered"):
                     # Schedule builds
                     args = {"schedule": []}
                     await enqueue_task(args)

@@ -79,7 +79,7 @@ docker_args+="-v $(abspath "$srcdir"):/source-ro:ro -v $(abspath "$outdir"):/out
 # disable any selinux stuff while using rh and derivates with podman
 [[  "$( docker --version )" =~ "podman" ]] && docker_args+="--security-opt label=disable "
 
-cmd="docker run $docker_args $image /build-helper.sh"
+cmd="docker run $docker_args $image ./build-helper.sh"
 
 echo "Running docker:"
 echo "$cmd"

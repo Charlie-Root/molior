@@ -70,11 +70,11 @@ docker_args+="-v $(abspath "$srcdir"):/source-ro:ro -v $(abspath "$outdir"):/out
 # Pass current UID and GID to container, so that it can change the
 # ownership of output files which are otherwise writen to outdir as
 # root
-docker_args+="-e USER=$(id -u) -e GROUP=$(id -g) "
+#docker_args+="-e USER=$(id -u) -e GROUP=$(id -g) "
 
 # Comment following out if you want to keep container after execution
 # for debugging
-docker_args+="--rm "
+#docker_args+="--rm "
 
 # disable any selinux stuff while using rh and derivates with podman
 [[  "$( docker --version )" =~ "podman" ]] && docker_args+="--security-opt label=disable "
